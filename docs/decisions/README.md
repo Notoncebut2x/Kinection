@@ -1,0 +1,30 @@
+# Architecture Decision Records
+
+This directory contains Architecture Decision Records (ADRs) in [MADR format](https://adr.github.io/madr/).
+
+Each record documents a significant technical or architectural choice made in the project:
+what the problem was, what options were considered, what was chosen, and why.
+
+## Status legend
+
+| Status    | Meaning |
+|-----------|---------|
+| Accepted  | Decision is in effect and implemented |
+| Proposed  | Decision is planned but not yet implemented (Phase 2+ work) |
+| Deprecated | No longer applies |
+| Superseded | Replaced by a later ADR |
+
+## Index
+
+| # | Title | Status | Phase |
+|---|-------|--------|-------|
+| [0001](0001-reference-dataset-aadr-v62.md) | Use AADR v62.0 as reference dataset | Accepted | Phase 1 |
+| [0002](0002-similarity-metric-allele-sharing-distance.md) | Use allele-sharing distance (ASD) as similarity metric | Accepted | Phase 1 |
+| [0003](0003-pseudo-haploidisation-strategy.md) | Pseudo-haploidise modern individual for ASD computation | Accepted | Phase 1 |
+| [0004](0004-analysis-language-python.md) | Use Python for the analysis engine | Accepted | Phase 1 |
+| [0005](0005-palindromic-snp-exclusion.md) | Exclude palindromic SNPs during strand alignment | Accepted | Phase 1 |
+| [0006](0006-haplogroup-reference-databases.md) | Use ISOGG Y-DNA tree and PhyloTree B17 for haplogroup assignment | Accepted | Phase 1 |
+| [0007](0007-web-backend-fastapi.md) | Use FastAPI as the web backend framework | Proposed | Phase 2 |
+| [0008](0008-async-job-queue-celery-redis.md) | Use Celery with Redis for async job processing | Proposed | Phase 2 |
+| [0009](0009-database-postgresql.md) | Use PostgreSQL as the application database | Proposed | Phase 2 |
+| [0010](0010-chunked-geno-processing.md) | Process GENO file in SNP-row chunks | Accepted | Phase 1 |

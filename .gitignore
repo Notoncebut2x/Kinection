@@ -1,0 +1,36 @@
+# Raw DNA input data — never commit (sensitive personal data + large binary files)
+data/input_data/
+
+# Large binary cache and chunk files
+data/output_data/*.pkl
+data/output_data/*.npy
+
+# Python virtual environment
+venv/
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Logs (keep log files in output/ for reference, but ignore root-level logs)
+*.log
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Environment variables
+.env
+.env.*
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo

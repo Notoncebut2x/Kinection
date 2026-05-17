@@ -1,0 +1,294 @@
+DNA LINEAGE PLATFORM — PROJECT UPDATE
+Generated: 2026-05-17
+================================================================================
+
+PROJECT OVERVIEW
+----------------
+A web platform for personal DNA analysis against the Allen Ancient DNA Resource
+(AADR) v62.0 — 17,629 ancient individuals across ~406,000 SNPs. Users upload
+raw AncestryDNA / 23andMe files and receive haplogroup assignments, ancient
+population matches, PCA positioning, and a narrative ancestry report.
+
+Methodology mirrors the Deep Maniot Greeks study (Communications Biology, 2026).
+
+Reference dataset:  AADR v62.0 (17,629 individuals, 1,233,013 SNPs in GENO file)
+Modern individual:  AncestryDNA V2.0 (660,192 SNPs)
+Dataset breakdown:  9,601 male / 7,269 female / 15,707 PASS assessment
+                    15,892 with Y haplogroup / 12,477 with mtDNA haplogroup
+
+
+================================================================================
+WHAT HAS BEEN BUILT
+================================================================================
+
+PHASE 1 — CORE ANALYSIS ENGINE (Python, local computation)
+-----------------------------------------------------------
+All of Phase 1 is implemented as standalone Python scripts in scripts/.
+Steps 1.1, 1.2, and 1.3 have been run successfully for the primary individual.
+Results are in output/step1_rn/, output/step2_rn/, output/step3_rn/.
+
+There is also a parallel set of outputs (step1/, step2/, step3/) for a second
+individual (Individual 2, run earlier in development).
+
+
+STEP 1.1 — Data Parsing and Harmonisation  [COMPLETE, run 2026-04-22]
+File: scripts/step1_parse_harmonise.py
+
+Why we're doing it:
+  Your DNA test gives you ~660,000 genetic markers, while the ancient dataset
+  uses a different set of ~400,000 markers. Before any comparison is possible,
+  we need to find the markers that appear in both lists, make sure they're
+  being read from the same strand of the DNA double helix, and convert
+  everything into a common numerical format. Think of it like translating two
+  documents written in slightly different dialects into a single shared language
+  before you can compare them. This step produces the shared "dictionary" that
+  every subsequent analysis is built on — nothing else can run without it.
+
+What it does:
+  - Parses AncestryDNA raw file: 660,192 SNPs across all chromosomes
+      (chr 1-22, X, Y: 1,628 SNPs, MT: 190 SNPs, PAR: 519 SNPs)
+  - Opens the EIGENSTRAT binary .geno file (2 bits per genotype, mmap'd)
+  - Parses the .ind individual list and .anno annotation file
+  - Finds the SNP position overlap between modern and ancient datasets
+  - Performs strand alignment — excludes palindromic (A/T, C/G) SNPs
+  - Encodes modern genotypes as alt-allele dosage (0/1/2, -1=missing)
+  - Writes encoded genotypes as a numpy .npy array
+
+Key result: 394,671 overlapping SNPs found between modern individual
+            and the ancient dataset (after strand alignment filtering)
+
+Outputs:
+  output/step1_rn/snp_overlap.tsv         — SNP positions, rsID, dosage
+  output/step1_rn/modern_indv_rn_encoded.npy — dosage array (int8)
+  output/step1_rn/step1_summary.json       — run statistics
+  output/step1_rn/step1.log
+
+Tools/libraries used:
+  - Python 3.14
+  - NumPy (array encoding)
+  - Custom EIGENSTRAT binary parser (GenoFile class in utils/parsers.py)
+  - Custom AncestryDNA parser (parse_ancestry_dna in utils/parsers.py)
+  - Custom ANNO parser (parse_anno_file in utils/parsers.py)
+
+
+STEP 1.2 — Haplogroup Assignment  [COMPLETE]
+File: scripts/step2_haplogroup.py
+
+Why we're doing it:
+  Your paternal lineage (passed down through men, father to son) and your
+  maternal lineage (passed down through women, mother to child) are tracked by
+  two special parts of your DNA — the Y chromosome and mitochondrial DNA.
+  These don't get reshuffled every generation like the rest of your genome,
+  so they act like a family surname for your deep ancestry. By identifying
+  which branch of the global family tree you belong to and then finding ancient
+  individuals who share that same branch, we can pinpoint exactly which ancient
+  populations your direct paternal and maternal lines descend from, and roughly
+  when those lineages lived. This is the most direct, unambiguous ancestry
+  signal we can extract.
+
+What it does:
+  - Assigns Y-DNA (paternal) haplogroup using ISOGG marker database
+      Checks derived state at each Y marker; walks tree from root to tip
+      Resolves rsID vs genomic position for matching
+  - Assigns mtDNA (maternal) haplogroup using PhyloTree B17 logic
+      Scores candidate haplogroups by proportion of required markers found
+  - Searches all 17,629 ancient individuals for haplogroup matches
+      Ranks by match type (Y+MT > Y-only > MT-only) and proximity score
+  - Computes allele-sharing distance (ASD) on Y chromosome vs all ancient males
+  - Computes ASD on mitochondrial DNA vs all ancient individuals
+
+RESULTS FOR PRIMARY INDIVIDUAL (RN):
+  Paternal (Y-DNA):  R1b1a1b  [HIGH confidence]
+    Markers confirmed: M9 (K), M45 (P), M207 (R), M343 (R1b), M269 (R1b1a1b)
+    The R1b1a1b / M269 lineage is the dominant paternal haplogroup in
+    Western Europe, associated with Yamnaya/Steppe Bronze Age expansion.
+
+  Maternal (mtDNA):  R  (macro-haplogroup)  [HIGH confidence, score 1.0]
+    Defining marker: position 1438 (A→G transition), rs2001030
+    Macro-haplogroup R is the ancestor of H, U, J, T, K, W, X — the
+    dominant maternal lineages of modern West Eurasians.
+    Note: limited mtDNA coverage on AncestryDNA array (~190 MT SNPs)
+    prevents sub-haplogroup resolution; dedicated mtDNA sequencing needed
+    for full HVR1/HVR2 assignment.
+
+  Ancient haplogroup matches found: 100 individuals (Y-only, MT-only, Y+MT)
+
+Outputs:
+  output/step2_rn/ydna_haplogroup.json         — Y assignment + evidence
+  output/step2_rn/mtdna_haplogroup.json         — mtDNA assignment + evidence
+  output/step2_rn/ancient_haplogroup_matches.tsv — top 100 ancient matches
+  output/step2_rn/haplogroup_report.md           — narrative report (Markdown)
+  output/step2_rn/ydna_distances.tsv             — Y-chr ASD rankings
+  output/step2_rn/mtdna_distances.tsv            — mtDNA ASD rankings
+
+Tools/libraries used:
+  - Python 3.14
+  - NumPy (ASD computation, vectorised GENO row reading)
+  - scripts/data/ydna_markers.json  — ISOGG Y-DNA marker reference (34 markers)
+  - scripts/data/mtdna_markers.json — PhyloTree B17 mtDNA reference
+
+
+STEP 1.3 — Genome-wide SNP Similarity and PCA  [COMPLETE]
+File: scripts/step3_similarity_pca.py
+
+Why we're doing it:
+  Haplogroups only tell you about two thin lines of ancestry — one through
+  your father's father's father... and one through your mother's mother's
+  mother. But you also inherited DNA from hundreds of other ancestors. This
+  step looks at your entire genome and asks: across all 394,000 shared genetic
+  markers, which ancient people look most similar to you overall? It's the
+  difference between knowing your surname came from Ireland versus knowing
+  that 40% of your ancestry traces to Bronze Age Iberia. The PCA part creates
+  a kind of genetic map — imagine plotting every ancient person as a dot on a
+  page based on their DNA, and then dropping your own dot in to see which
+  clusters you land nearest to. That's the most powerful tool in modern
+  population genetics for visualising where someone sits in the ancient world.
+
+What it does:
+  - Computes pairwise allele-sharing distance (ASD) between the modern
+    individual and all 17,629 ancient individuals
+  - Uses pseudo-haploidisation: at heterozygous sites, randomly picks one
+    allele (10 draws averaged) so both sides are pseudo-haploid — eliminates
+    the systematic 0.5 bias that inflates distances with naive diploid/haploid
+    comparisons
+  - Autosomal chromosomes only (chr 1-22); processes in 5,000-SNP chunks
+  - Aggregates individual distances to population-level means
+  - Identifies high-coverage ancient individuals for PCA (≥100,000 1240k SNPs)
+  - Computes PCA via scikit-learn; projects modern individual into ancient space
+  - Writes population rankings and individual rankings
+
+PCA variance explained (10 components):
+  PC1: 3.04%  PC2: 2.90%  PC3: 0.79%  PC4: 0.42%  PC5: 0.30%
+  PC6: 0.27%  PC7: 0.17%  PC8: 0.15%  PC9: 0.14%  PC10: 0.13%
+
+Outputs:
+  output/step3_rn/pairwise_distances.tsv     — 17,629 individual distances
+  output/step3_rn/population_distances.tsv   — 3,412 populations ranked
+  output/step3_rn/pca_coordinates.tsv        — ancient + modern PCA coords
+  output/step3_rn/pca_variance_explained.json
+  output/step3_rn/top_matches_report.md       — narrative report
+  output/step3_rn/step3.log
+
+Tools/libraries used:
+  - Python 3.14
+  - NumPy (vectorised ASD, chunk processing)
+  - scikit-learn PCA (with numpy SVD fallback if sklearn unavailable)
+
+
+SHARED INFRASTRUCTURE
+---------------------
+File: scripts/utils/parsers.py
+
+  GenoFile class        — memory-mapped EIGENSTRAT binary .geno reader
+                          reads individual SNP rows on demand (2 bits/genotype)
+  parse_ancestry_dna()  — AncestryDNA raw file parser → SNP dataclass dict
+  parse_ind_file()      — EIGENSTRAT .ind parser → list of Individual objects
+  parse_anno_file()     — AADR .anno annotation parser → dict of AnnoRecord
+  complement()          — DNA strand complement helper
+  SNP / Individual / AnnoRecord dataclasses
+
+Marker databases:
+  scripts/data/ydna_markers.json  — ISOGG Y-DNA branch-defining markers
+  scripts/data/mtdna_markers.json — PhyloTree B17 key positions + haplogroup logic
+
+Output files from earlier exploratory IBD analysis (data/output_data/):
+  These were produced in July 2025 before the structured WORKPLAN. They used
+  a chunked IBD-style similarity score approach (500 individuals per chunk).
+  Best match found: KD059.SG (Scotland_Orkney_MBA.SG, Bronze Age Orkney)
+  Similarity score: 0.4597 / Genotype similarity: 37.3%
+  These have been superseded by the Step 1.3 ASD method which is more
+  methodologically rigorous (pseudo-haploidisation, population-level ranking).
+
+output/dual_haplogroup_matches.csv:
+  Cross-individual haplogroup comparison between the two modern individuals.
+
+
+================================================================================
+WHAT IS IN THE PIPELINE (NOT YET BUILT)
+================================================================================
+
+STEP 1.4 — TMRCA Estimation  [PENDING]
+  - Count branch-defining SNP differences between modern Y and each ancient match
+  - Apply Y-chr mutation rate (~0.74 × 10⁻⁹ substitutions/bp/year)
+  - Estimate TMRCA with 95% confidence intervals for top 10 Y matches
+  - Apply mtDNA mutation rate (~1.26 × 10⁻⁸ substitutions/bp/year) for maternal
+  - Cross-validate against known archaeological dates
+  Planned outputs: ydna_tmrca.tsv, mtdna_tmrca.tsv, tmrca_timeline.json
+
+STEP 1.5 — AMOVA and Population Structure  [PENDING]
+  - Select reference ancient populations (Anatolian Neolithic, Bronze Age Steppe,
+1
+  - Run AMOVA partitioning genetic variance: within/among individuals/populations
+  - Compute FST analogues between modern individual and each ancient group
+  Planned outputs: amova_results.tsv, fst_table.tsv
+
+STEP 1.6 — Interpretation and Report Generation  [PENDING]
+  - Synthesise all Phase 1 outputs into a structured report
+  - Narrative interpretation: paternal lineage, maternal lineage, autosomal story
+  - Geographic and temporal distribution of matches
+  - GeoJSON for map rendering
+  Planned outputs: individual_report.json, individual_report.md,
+                   individual_map_data.geojson
+
+PHASE 2 — WEB PLATFORM ARCHITECTURE  [PENDING]
+  Planned tech stack:
+    Backend:    FastAPI (Python) — consistent with analysis codebase
+    Frontend:   React + TypeScript + Tailwind CSS
+    Database:   PostgreSQL (users, uploads, jobs, results, haplogroup assignments)
+    Storage:    S3-compatible (raw uploads + analysis results)
+    Job queue:  Celery + Redis (async per-user analysis pipeline)
+    Auth:       Email/password + optional Google/Apple OAuth
+
+PHASE 3 — PRODUCTION PIPELINE INTEGRATION  [PENDING]
+  - Extend parser to handle all consumer DNA formats:
+      AncestryDNA V1 and V2 (have examples), 23andMe (v3/v4/v5),
+      FamilyTreeDNA Family Finder, MyHeritage, Living DNA
+  - Pre-compute population-level SNP allele frequency matrix to reduce
+    per-user compute from O(17,629 individuals) to O(~450 populations)
+  - Pre-compute PCA eigenvectors once; project each new user in O(minutes)
+  - QC gates: minimum SNP count, chromosome completeness, minimum overlap
+  - Target analysis time: ≤5 minutes per user
+
+PHASE 4 — VISUALISATIONS AND USER REPORT UI  [PENDING]
+  Planned components:
+    - Haplogroup badge (Y + mtDNA, phylogenetic context)
+    - Lineage timeline (haplogroup branch ages vs archaeological cultures)
+    - Ancient population bar chart (top 20 closest populations)
+    - Geographic map (interactive, ancient match locations)
+    - PCA scatter plot (user projected into ancient population space)
+    - TMRCA date ranges with confidence intervals
+    - Narrative plain-English ancestry interpretation
+  Planned libraries: Mapbox GL JS or Leaflet, D3.js, Plotly.js, Recharts
+
+PHASE 5 — PRIVACY, ETHICS, AND LEGAL  [PENDING]
+  - Data retention policy, right-to-deletion (GDPR Article 17)
+  - Encryption at rest and in transit
+  - Pseudonymisation of genetic data
+  - Informed consent flow (before any upload)
+  - GDPR + CCPA compliance review
+  - Terms of service (legal counsel required before launch)
+
+PHASE 6 — BETA LAUNCH AND SCALE  [PENDING]
+  - 20-50 beta users with diverse ancestry
+  - Cross-check haplogroup assignments against known results
+  - Auto-scaling job workers, CDN, rate limiting
+  - Dataset versioning system (AADR releases updates periodically)
+
+
+================================================================================
+CURRENT STATUS SUMMARY
+================================================================================
+
+Phase 1 progress:  Steps 1.1, 1.2, 1.3 COMPLETE  |  Steps 1.4, 1.5, 1.6 PENDING
+Phases 2–6:        Not yet started
+
+The core computational analysis for the primary individual is done. The pipeline
+produces Y/mtDNA haplogroup assignments, ranked ancient individual matches,
+ranked population distances, and PCA coordinates.
+
+The immediate next step before moving to web platform work is completing
+Steps 1.4 (TMRCA), 1.5 (AMOVA), and 1.6 (report synthesis) so there is a
+complete end-to-end result for Individual 1 that can serve as the template
+for the web platform's output report structure.
+
+================================================================================
