@@ -1,6 +1,8 @@
 name = "kinection-api"
 main = "src/index.ts"
 compatibility_date = "2024-09-23"
+workers_dev = true
+preview_urls = false
 
 [[r2_buckets]]
 binding = "R2"
@@ -9,26 +11,11 @@ bucket_name = "kinection"
 [[d1_databases]]
 binding = "DB"
 database_name = "kinection"
-database_id = "REPLACE_WITH_D1_ID"
-
-[[queues.producers]]
-binding = "ANALYSIS_QUEUE"
-queue = "analysis-jobs"
-
-[[queues.consumers]]
-queue = "analysis-jobs"
-max_batch_size = 1
-max_retries = 3
-dead_letter_queue = "analysis-jobs-dlq"
+database_id = "e163132e-cdce-4208-baba-8596331243dd"
 
 [[kv_namespaces]]
 binding = "MARKER_CACHE"
-id = "REPLACE_WITH_KV_ID"
+id = "ce7a59f47d0d48a189db114e518f9ce8"
 
 [vars]
-COMPUTE_SERVICE_URL = ""
-COMPUTE_API_KEY = ""
-
-[[migrations]]
-tag = "v1"
-new_classes = []
+# COMPUTE_API_KEY is set via: wrangler secret put COMPUTE_API_KEY

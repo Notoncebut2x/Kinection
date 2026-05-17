@@ -1,38 +1,13 @@
-/*
- * D1 Schema — run via `wrangler d1 execute kinection --file=schema.sql`
- *
- * CREATE TABLE IF NOT EXISTS jobs (
- *   id TEXT PRIMARY KEY,
- *   status TEXT NOT NULL DEFAULT 'queued',
- *   upload_key TEXT NOT NULL,
- *   result_prefix TEXT NOT NULL,
- *   created_at INTEGER NOT NULL,
- *   updated_at INTEGER NOT NULL,
- *   error TEXT
- * );
- */
-
 export interface Env {
   R2: R2Bucket;
   DB: D1Database;
-  ANALYSIS_QUEUE: Queue;
   MARKER_CACHE: KVNamespace;
-  COMPUTE_SERVICE_URL: string;
   COMPUTE_API_KEY: string;
-}
-
-interface AnalysisJob {
-  jobId: string;
-  uploadKey: string;
-  resultPrefix: string;
-  createdAt: number;
 }
 
 interface JobRow {
   id: string;
   status: string;
-  upload_key: string;
-  result_prefix: string;
   created_at: number;
   updated_at: number;
   error: string | null;
@@ -55,6 +30,10 @@ function err(message: string, status: number): Response {
   return json({ error: message }, status);
 }
 
+function isAuthorized(request: Request, env: Env): boolean {
+  return request.headers.get("Authorization") === `Bearer ${env.COMPUTE_API_KEY}`;
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     if (request.method === "OPTIONS") {
@@ -65,19 +44,29 @@ export default {
     const { pathname } = url;
 
     try {
-      // GET /jobs/:id
+      // POST /jobs — web app creates a new job
+      if (request.method === "POST" && pathname === "/jobs") {
+        return handleCreateJob(env);
+      }
+
+      // GET /jobs?status=queued — daemon polls for pending jobs (requires auth)
+      if (request.method === "GET" && pathname === "/jobs") {
+        return handleListJobs(request, url, env);
+      }
+
+      // GET /jobs/:id — web app polls job status
       const jobMatch = pathname.match(/^\/jobs\/([^/]+)$/);
       if (request.method === "GET" && jobMatch) {
         return handleGetJob(jobMatch[1], env);
       }
 
-      // PATCH /jobs/:id/status
+      // PATCH /jobs/:id/status — daemon reports job outcome (requires auth)
       const statusMatch = pathname.match(/^\/jobs\/([^/]+)\/status$/);
       if (request.method === "PATCH" && statusMatch) {
         return handleUpdateStatus(request, statusMatch[1], env);
       }
 
-      // GET /jobs/:id/results/:filename
+      // GET /jobs/:id/results/:filename — web app fetches result file from R2
       const resultMatch = pathname.match(/^\/jobs\/([^/]+)\/results\/([^/]+)$/);
       if (request.method === "GET" && resultMatch) {
         return handleGetResult(resultMatch[1], resultMatch[2], env);
@@ -89,29 +78,40 @@ export default {
       return err("Internal server error", 500);
     }
   },
-
-  async queue(batch: MessageBatch<AnalysisJob>, env: Env): Promise<void> {
-    for (const message of batch.messages) {
-      const job = message.body;
-
-      const response = await fetch(`${env.COMPUTE_SERVICE_URL}/process`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${env.COMPUTE_API_KEY}`,
-        },
-        body: JSON.stringify(job),
-      });
-
-      if (!response.ok) {
-        const text = await response.text().catch(() => "(no body)");
-        throw new Error(
-          `Compute service returned ${response.status}: ${text}`
-        );
-      }
-    }
-  },
 };
+
+async function handleCreateJob(env: Env): Promise<Response> {
+  const id = crypto.randomUUID();
+  const now = Date.now();
+
+  await env.DB.prepare(
+    `INSERT INTO jobs (id, status, created_at, updated_at) VALUES (?, 'queued', ?, ?)`
+  )
+    .bind(id, now, now)
+    .run();
+
+  return json({ id, status: "queued", created_at: now }, 201);
+}
+
+async function handleListJobs(
+  request: Request,
+  url: URL,
+  env: Env
+): Promise<Response> {
+  if (!isAuthorized(request, env)) {
+    return err("Unauthorized", 401);
+  }
+
+  const status = url.searchParams.get("status") ?? "queued";
+
+  const result = await env.DB.prepare(
+    `SELECT * FROM jobs WHERE status = ? ORDER BY created_at ASC LIMIT 10`
+  )
+    .bind(status)
+    .all<JobRow>();
+
+  return json(result.results);
+}
 
 async function handleGetJob(id: string, env: Env): Promise<Response> {
   const result = await env.DB.prepare("SELECT * FROM jobs WHERE id = ?")
@@ -130,8 +130,7 @@ async function handleUpdateStatus(
   id: string,
   env: Env
 ): Promise<Response> {
-  const authHeader = request.headers.get("Authorization");
-  if (authHeader !== `Bearer ${env.COMPUTE_API_KEY}`) {
+  if (!isAuthorized(request, env)) {
     return err("Unauthorized", 401);
   }
 
@@ -185,8 +184,7 @@ async function handleGetResult(
     json: "application/json",
     md: "text/markdown",
   };
-  const contentType =
-    contentTypeMap[ext ?? ""] ?? "application/octet-stream";
+  const contentType = contentTypeMap[ext ?? ""] ?? "application/octet-stream";
 
   return new Response(object.body, {
     headers: {
