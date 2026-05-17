@@ -223,19 +223,20 @@ def main() -> None:
     # Resolve input paths (download from R2 to temp files if USE_R2)
     # ------------------------------------------------------------------
     _tmp_files: list[Path] = []
+    # Modern individual DNA file always read from local disk — never stored in R2.
+    _modern_path = MODERN_INDV1
+
     if USE_R2:
-        log.info("R2 mode: downloading input files for job %s", JOB_ID)
-        _modern_path = r2_client.download_to_temp(r2_client.upload_key(JOB_ID), '.txt')
-        _ind_path    = r2_client.download_to_temp(r2_client.IND_KEY,  '.ind')
-        _anno_path   = r2_client.download_to_temp(r2_client.ANNO_KEY, '.anno')
-        _snp_path    = r2_client.download_to_temp(r2_client.SNP_KEY,  '.snp')
-        _tmp_files   = [_modern_path, _ind_path, _anno_path, _snp_path]
+        log.info("R2 mode: downloading AADR reference files for job %s", JOB_ID)
+        _ind_path  = r2_client.download_to_temp(r2_client.IND_KEY,  '.ind')
+        _anno_path = r2_client.download_to_temp(r2_client.ANNO_KEY, '.anno')
+        _snp_path  = r2_client.download_to_temp(r2_client.SNP_KEY,  '.snp')
+        _tmp_files = [_ind_path, _anno_path, _snp_path]
         geno = R2GenoFile.open(r2_client.GENO_KEY)
     else:
-        _modern_path = MODERN_INDV1
-        _ind_path    = IND_FILE
-        _anno_path   = ANNO_FILE
-        _snp_path    = SNP_FILE
+        _ind_path  = IND_FILE
+        _anno_path = ANNO_FILE
+        _snp_path  = SNP_FILE
         geno = GenoFile.open(GENO_FILE)
 
     log.info("Modern individual: %s", _modern_path.name)

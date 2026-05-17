@@ -65,11 +65,6 @@ export default {
     const { pathname } = url;
 
     try {
-      // POST /upload
-      if (request.method === "POST" && pathname === "/upload") {
-        return handleUpload(request, env);
-      }
-
       // GET /jobs/:id
       const jobMatch = pathname.match(/^\/jobs\/([^/]+)$/);
       if (request.method === "GET" && jobMatch) {
@@ -117,46 +112,6 @@ export default {
     }
   },
 };
-
-async function handleUpload(request: Request, env: Env): Promise<Response> {
-  const contentType = request.headers.get("Content-Type") ?? "";
-  if (!contentType.includes("multipart/form-data")) {
-    return err("Expected multipart/form-data", 400);
-  }
-
-  const formData = await request.formData();
-  const file = formData.get("dna_file");
-  if (!file || !(file instanceof File)) {
-    return err("Missing dna_file field", 400);
-  }
-
-  const jobId = crypto.randomUUID();
-  const uploadKey = `uploads/${jobId}/raw.txt`;
-  const resultPrefix = `outputs/${jobId}`;
-  const now = Date.now();
-
-  await env.R2.put(uploadKey, file.stream(), {
-    httpMetadata: { contentType: file.type || "text/plain" },
-  });
-
-  await env.DB.prepare(
-    `INSERT INTO jobs (id, status, upload_key, result_prefix, created_at, updated_at)
-     VALUES (?, 'queued', ?, ?, ?, ?)`
-  )
-    .bind(jobId, uploadKey, resultPrefix, now, now)
-    .run();
-
-  const analysisJob: AnalysisJob = {
-    jobId,
-    uploadKey,
-    resultPrefix,
-    createdAt: now,
-  };
-
-  await env.ANALYSIS_QUEUE.send(analysisJob);
-
-  return json({ jobId }, 202);
-}
 
 async function handleGetJob(id: string, env: Env): Promise<Response> {
   const result = await env.DB.prepare("SELECT * FROM jobs WHERE id = ?")

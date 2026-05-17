@@ -37,10 +37,7 @@ SNP_KEY  = f'{DATASET_PREFIX}/v62.0_1240k_public.snp'
 YDNA_MARKERS_KEY  = 'markers/ydna_markers.json'
 MTDNA_MARKERS_KEY = 'markers/mtdna_markers.json'
 
-
-def upload_key(job_id: str) -> str:
-    """R2 key for a user's raw DNA upload."""
-    return f'uploads/{job_id}/raw.txt'
+# Modern individual DNA files are NEVER stored in R2 — local filesystem only.
 
 
 def output_key(job_id: str, filename: str) -> str:
