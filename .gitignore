@@ -1,6 +1,9 @@
 # Raw DNA input data — never commit (sensitive personal data + large binary files)
 data/input_data/
 
+# Analysis outputs — contain derived personal genetic data, never commit
+output/
+
 # Large binary cache and chunk files
 data/output_data/*.pkl
 data/output_data/*.npy
