@@ -208,13 +208,82 @@ AADR contains far more European and Near Eastern samples than African or Pacific
 
 ---
 
+## Step 1.5 — Admixture Decomposition
+
+**Script:** `scripts/step1_5_admixture.py`
+
+### What it does
+
+This is the headline result of the whole pipeline. It decomposes your genome into proportions of ancient source populations — the "you are X% Steppe, Y% Anatolian Farmer, Z% Levantine" answer.
+
+For the modern Western Eurasian model, we fit your allele frequencies as a non-negative weighted combination of six well-defined ancient sources:
+
+| Source | What it is |
+|---|---|
+| WHG | Western European Hunter-Gatherer (Mesolithic, ~9000–5000 BCE) |
+| EHG | Eastern European Hunter-Gatherer (around the Volga–Urals) |
+| EEF | Anatolian / Early European Farmer (the wave that brought agriculture into Europe ~6500 BCE) |
+| Steppe | Yamnaya / Afanasievo herders from the Pontic-Caspian steppe (~3300 BCE) |
+| Levant_N | Levantine Neolithic farmer (Jordan PPNB, Israel Natufian) |
+| Iran_N | Iranian Neolithic / Caucasus Hunter-Gatherer |
+
+### The science
+
+After the Last Glacial Maximum, human populations across Western Eurasia descended from a small number of distinct ancestral groups. Almost everyone today is a mixture. Modern Europeans, for example, are roughly:
+- Some fraction Mesolithic European Hunter-Gatherer
+- Some fraction Anatolian Neolithic Farmer (came in 8,000 years ago)
+- Some fraction Steppe / Yamnaya (came in 5,000 years ago)
+- Varying smaller fractions of other components
+
+If you can pin down the allele frequencies of each ancestral group from preserved skeletons, you can write your own allele frequencies as a weighted sum of those — and solve for the weights.
+
+### The method (NNLS)
+
+We solve:
+
+```
+minimize  ‖A · α − b‖²
+subject to   αᵢ ≥ 0,   Σ αᵢ = 1
+```
+
+where `A` is the matrix of source allele frequencies, `b` is your allele frequency vector, and `α` is the proportions to estimate. This is *constrained non-negative least squares*, implemented with `scipy.optimize.minimize` using SLSQP.
+
+95 % confidence intervals come from **chromosome-block bootstrap**: resample which chromosomes are in the fit (with replacement) and re-fit 200 times, then take the 2.5 / 97.5 percentiles. Chromosome blocks rather than individual SNPs because adjacent SNPs are in linkage disequilibrium and aren't independent observations.
+
+### The caveats — important ones
+
+**The Levant_N component captures deep Levantine farmer ancestry shared by many populations, not Ashkenazi-specific ancestry.** Anyone with significant Greek, Italian, Spanish, or Near Eastern ancestry will show Levant_N. For specifically detecting Ashkenazi Jewish ancestry you'd need an Iron Age / Bronze Age Levantine source population (which AADR mostly lacks) and a careful three-population test.
+
+**NNLS is the lightweight alternative to qpAdm.** Published ancient-DNA papers use *qpAdm*, which is more rigorous — it uses outgroup f₄-statistics and produces a P-value for model fit. NNLS will get you in the same ballpark, but the exact decimal points and especially the split between correlated sources (like EEF vs Levant_N) will differ. See [ADR-0013](decisions/0013-admixture-nnls.md) for why we chose NNLS over qpAdm.
+
+**Correlated sources can swap weights.** EEF and Levant_N are both Neolithic farmer populations and have similar allele frequencies. NNLS sometimes concentrates farmer-ancestry on one or the other arbitrarily. If your EEF or Levant_N looks oddly extreme, the *sum* of the two is usually well-estimated even when the split isn't.
+
+**CIs reflect statistical noise only.** They tell you how the model would jitter if you re-ran with bootstrapped SNPs. They do not capture model misspecification, source-population miscuration, or the fact that the source pops aren't truly ancestral to you.
+
+### What you get
+
+- `admixture_decomposition.json` — proportions, CIs, residual, source metadata
+- `admixture_report.md` — narrative summary with the headline table and caveats
+- `source_coverage.tsv` — diagnostic: which AADR individuals were used for each source
+
+For someone with mixed Northern European + Ashkenazi Jewish ancestry, expect roughly:
+- Levant_N: 20–35 % (driven by the Levantine farmer component of Ashkenazi ancestry plus deep Mediterranean farmer admixture)
+- Steppe: 15–25 %
+- WHG: 15–25 %
+- EEF: 10–20 %
+- EHG: 5–15 %
+- Iran_N: 0–10 %
+
+For someone of purely Northern European ancestry, expect Steppe + WHG + EEF to dominate (each ~25–35 %) and Levant_N to be smaller (~5–15 %).
+
+---
+
 ## What's coming
 
-Currently steps 1.1, 1.2, and 1.3 (parse-harmonise, haplogroup, similarity+PCA) are implemented. Planned next:
+Currently steps 1.1, 1.2, 1.3, and 1.5 are implemented. Planned next:
 
 - **Step 1.4 — TMRCA estimation** — How long ago did you and a given ancient individual last share a common ancestor? This adds a *time* dimension to the matches.
-- **Step 1.5 — AMOVA / admixture decomposition** — Decompose your ancestry into ancient-population components: e.g., "55% Steppe Bronze Age, 30% Anatolian Farmer, 15% Western Hunter-Gatherer." This is the headline number for most ancient-DNA analyses of modern Europeans.
-- **Step 1.6 — Synthesis report** — A single human-readable PDF combining steps 1.1–1.5 with maps and a timeline.
+- **Step 1.6 — Synthesis report** — A single human-readable PDF combining all steps with maps and a timeline.
 
 Then Phase 2 (web frontend) — a browser-based way for users to upload, kick off, watch, and read their report.
 

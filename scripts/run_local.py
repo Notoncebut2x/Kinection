@@ -80,6 +80,8 @@ def build_report(label: str, run_started: datetime) -> str:
     step2_report  = read_text(OUTPUT / "step2_rn" / "haplogroup_report.md")
     step3_report  = read_text(OUTPUT / "step3_rn" / "top_matches_report.md")
     pca_variance  = read_json(OUTPUT / "step3_rn" / "pca_variance_explained.json")
+    admixture     = read_json(OUTPUT / "step1_5_rn" / "admixture_decomposition.json")
+    admix_report  = read_text(OUTPUT / "step1_5_rn" / "admixture_report.md")
 
     lines: list[str] = []
     lines.append(f"# Kinection Analysis Report — {label}")
@@ -121,6 +123,20 @@ def build_report(label: str, run_started: datetime) -> str:
                          f"across **{ancient.get('n_individuals', 0):,}** individuals")
         if "n_overlap_snps" in overlap:
             lines.append(f"- Overlapping SNPs (post-palindromic-filter): **{overlap['n_overlap_snps']:,}**")
+        lines.append("")
+
+    # ── Admixture decomposition headline ──────────────────────────────
+    if admixture:
+        lines.append("**Ancient ancestry composition:**")
+        lines.append("")
+        lines.append("| Source | % | 95% CI |")
+        lines.append("|---|---:|---:|")
+        props = admixture.get("proportions", {})
+        cis = admixture.get("ci95", {})
+        for name in sorted(props, key=lambda n: -props[n]):
+            p = props[name] * 100
+            lo, hi = (c * 100 for c in cis.get(name, (0, 0)))
+            lines.append(f"| {name} | {p:.1f}% | {lo:.1f}–{hi:.1f}% |")
         lines.append("")
 
     lines.append("---")
@@ -176,6 +192,21 @@ def build_report(label: str, run_started: datetime) -> str:
             lines.append(f"- PC{i}: {ev:.2%}")
         lines.append("")
 
+    lines.append("---")
+    lines.append("")
+
+    # ── Step 1.5 ──────────────────────────────────────────────────────
+    lines.append("## Step 1.5 — Admixture Decomposition")
+    lines.append("")
+    if admix_report:
+        body = "\n".join(
+            line for line in admix_report.splitlines()
+            if not line.startswith("# ")
+        )
+        lines.append(body.strip())
+    else:
+        lines.append("_Step 1.5 report not available._")
+    lines.append("")
     lines.append("---")
     lines.append("")
     lines.append("## How to read this")
@@ -254,6 +285,7 @@ def main() -> None:
     run_step("step1_parse_harmonise.py", env)
     run_step("step2_haplogroup.py", env)
     run_step("step3_similarity_pca.py", env)
+    run_step("step1_5_admixture.py", env)
     elapsed = time.time() - t0
 
     # Build combined report

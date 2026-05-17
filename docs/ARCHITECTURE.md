@@ -152,6 +152,7 @@ Three sequential steps. Each reads from local disk (modern DNA) and R2 (AADR ref
 | 1 | `step1_parse_harmonise.py` | AncestryDNA + AADR refs | SNP overlap, encoded modern genotypes |
 | 2 | `step2_haplogroup.py` | step 1 outputs + Y/mtDNA marker DBs | Y-DNA + mtDNA haplogroup, haplogroup matches |
 | 3 | `step3_similarity_pca.py` | step 1 outputs + AADR GENO | Pairwise ASD, population ranking, PCA |
+| 1.5 | `step1_5_admixture.py` | step 1 outputs + AADR GENO | Admixture proportions (WHG/EHG/EEF/Steppe/Levant_N/Iran_N) with 95% CIs |
 
 All three steps share `scripts/utils/`:
 - `parsers.py` — AncestryDNA, EIGENSTRAT `.ind`, AADR `.anno`, palindromic SNP filter

@@ -34,3 +34,4 @@ For the security posture, see [`../SECURITY.md`](../SECURITY.md).
 | [0010](0010-chunked-geno-processing.md) | Process GENO file in SNP-row chunks | Accepted | Phase 1 |
 | [0011](0011-cloudflare-r2-geno-storage.md) | Store AADR GENO file in Cloudflare R2, access via range requests | Accepted | Phase 2 |
 | [0012](0012-cloudflare-workers-api.md) | Use Cloudflare Workers as the web API layer | Accepted | Phase 2 |
+| [0013](0013-admixture-nnls.md) | Admixture decomposition via constrained NNLS | Accepted | Phase 1 |
