@@ -80,7 +80,7 @@ Three problems have to be solved before any comparison is possible:
 - `step1_summary.json` — quick stats: how many SNPs overlapped, how many were palindromic and excluded, how many you had genotypes for
 - `modern_indv_encoded.npy` — your genotypes as a compact NumPy array (input to steps 2 and 3)
 
-For Rory's actual data: 394,671 SNPs survived the overlap and the palindromic filter. That's a good number — population studies routinely work with fewer.
+Typical surviving overlap after the palindromic filter is in the range of 350,000–400,000 SNPs for an AncestryDNA V2 array — well above what most population genetics studies work with.
 
 See [ADR-0005](decisions/0005-palindromic-snp-exclusion.md) for the palindromic exclusion decision.
 
@@ -98,23 +98,23 @@ Determines your **paternal lineage** (Y-DNA haplogroup, men only — women inher
 
 The Y chromosome and mitochondrial DNA (mtDNA) are special: they pass down without recombining. Your Y chromosome is essentially identical to your father's, his father's, his father's father's, and so on, except for occasional mutations. Same with mtDNA through the maternal line.
 
-Researchers have built **phylogenetic trees** of every Y-DNA and mtDNA lineage on Earth. Specific mutations ("markers") define branching points. For example:
+Researchers have built **phylogenetic trees** of every Y-DNA and mtDNA lineage on Earth. Specific mutations ("markers") define branching points. For example, on the Y-DNA tree:
 
 - The mutation **M9** defines haplogroup K (~45,000 years old, originated in Asia)
 - **M207** defines R (a descendant of K, ~30,000 years old)
-- **M269** defines R1b1a1b (~6,500 years old, the dominant male lineage in Western Europe today, associated with the spread of Bronze Age steppe populations)
+- And so on through dozens more markers down to terminal sub-clades, each tagged with a name like "R-Z2103" or "I-M253" that encodes its position in the tree
 
-By checking which of these marker mutations you have, the script walks down the tree from the root to the deepest branch where your DNA still matches.
+By checking which of these marker mutations you have, the script walks down the tree from the root to the deepest branch where your DNA still matches. The current ISOGG tree has roughly 25,000 named branches.
 
 ### The catch
 
-AncestryDNA tests don't cover the Y chromosome densely — only ~34 ISOGG markers are usually present. So you'll typically get a confident assignment down to a major branch (e.g., R1b1a1b), but not all the way to the leaves (the full ISOGG tree has ~25,000 named sub-haplogroups). For finer resolution you'd need Big-Y or YFull sequencing.
+AncestryDNA tests don't cover the Y chromosome densely — only ~34 ISOGG markers are usually present. So you'll typically get a confident assignment down to a major branch, but not all the way to the leaves of the tree. For finer resolution you'd need Big-Y or YFull sequencing.
 
 mtDNA is similar: the AncestryDNA array covers ~190 mtDNA positions, enough for the major haplogroup (R, H, U, J, etc.) but not the full HVR1/HVR2 resolution that dedicated mtDNA sequencing gives.
 
 ### Matching to ancients
 
-Once your haplogroup is known, the script searches the AADR annotation file for ancient individuals with the same lineage, ranked by how *deep* the shared branching point is (a match at "R1b1a1b" is closer than a match at "R"). The best matches — individuals who share both Y and mtDNA with you — are flagged separately.
+Once your haplogroup is known, the script searches the AADR annotation file for ancient individuals with the same lineage, ranked by how *deep* the shared branching point is (a match at a fine-grained sub-haplogroup is closer than a match only at the macro level). The best matches — individuals who share both Y and mtDNA with you — are flagged separately.
 
 ### What you get
 
@@ -123,7 +123,7 @@ Once your haplogroup is known, the script searches the AADR annotation file for 
 - `ancient_haplogroup_matches.tsv` — top ancient individuals sharing your lineages, with archaeological context
 - `haplogroup_report.md` — a human-readable narrative of the above
 
-For Rory: Y-DNA **R1b1a1b**, mtDNA **R**. The Y assignment places his paternal line firmly in the post-Bronze Age Western European population that derives from Yamnaya / Steppe ancestry. The mtDNA at the macro-R level is consistent with a West Eurasian maternal lineage but not more specific without dedicated mtDNA sequencing.
+The depth of your Y-DNA assignment depends on which markers your array happens to cover; a macro-haplogroup will be assigned with high confidence, but a precise sub-clade requires denser Y sequencing. mtDNA from an array test typically lands at the macro-haplogroup level (R, H, U, J, etc.) and won't resolve sub-haplogroups without dedicated mtDNA sequencing.
 
 See [ADR-0006](decisions/0006-haplogroup-reference-databases.md) for the marker database choices (ISOGG for Y, PhyloTree B17 for mtDNA).
 
@@ -196,7 +196,7 @@ Genetic similarity reflects shared ancestry, but human populations have been mix
 
 **Haplogroup ≠ ethnicity**
 
-Y-DNA R1b1a1b is found at high frequency in Western Europe, but also among populations as far apart as Bashkirs (Russia) and parts of Cameroon. A haplogroup is one specific line of descent through your father's-father's-father's line; it represents about 1/2^N of your ancestry going back N generations. Your *autosomal* DNA (everything else) is far more representative of "who you are descended from."
+Even very common haplogroups can be found at high frequency across populations separated by thousands of miles, because Y and mtDNA lineages have moved with men and women throughout prehistory. A haplogroup is one specific line of descent through your father's-father's-father's line (or mother's-mother's-mother's line); it represents about 1/2^N of your ancestry going back N generations. Your *autosomal* DNA (everything else) is far more representative of "who you are descended from."
 
 **Confidence depends on coverage**
 
