@@ -30,6 +30,10 @@ __pycache__/
 .env.local
 .dev.vars
 
+# Wrangler local state
+.wrangler/
+workers/**/.wrangler/
+
 # Editor
 .vscode/
 .idea/
