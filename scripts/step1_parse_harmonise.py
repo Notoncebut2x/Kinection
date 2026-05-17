@@ -42,6 +42,9 @@ import numpy as np
 # ---------------------------------------------------------------------------
 USE_R2 = os.environ.get('USE_R2', '').lower() in ('1', 'true', 'yes')
 JOB_ID = os.environ.get('JOB_ID', 'dev')
+# When set, do not upload outputs to R2 — keep everything on local disk.
+# Useful for "run analysis fully locally; AADR still streamed from R2".
+LOCAL_OUTPUTS = os.environ.get('LOCAL_OUTPUTS', '').lower() in ('1', 'true', 'yes')
 
 # ---------------------------------------------------------------------------
 # Paths (used in local mode; ignored when USE_R2=1)
@@ -224,7 +227,8 @@ def main() -> None:
     # ------------------------------------------------------------------
     _tmp_files: list[Path] = []
     # Modern individual DNA file always read from local disk — never stored in R2.
-    _modern_path = MODERN_INDV1
+    # MODERN_DNA env var overrides the default path so different individuals can be analysed.
+    _modern_path = Path(os.environ['MODERN_DNA']) if os.environ.get('MODERN_DNA') else MODERN_INDV1
 
     if USE_R2:
         log.info("R2 mode: downloading AADR reference files for job %s", JOB_ID)
@@ -471,14 +475,19 @@ def main() -> None:
     geno.close()
 
     # ------------------------------------------------------------------
-    # Upload outputs to R2 (R2 mode only)
+    # Upload outputs to R2 (R2 mode only, unless LOCAL_OUTPUTS=1)
     # ------------------------------------------------------------------
-    if USE_R2:
+    if USE_R2 and not LOCAL_OUTPUTS:
         for local_file in [tsv_path, npy_path, summary_path]:
             if local_file and Path(local_file).exists():
                 key = r2_client.output_key(JOB_ID, Path(local_file).name)
                 r2_client.upload_file(local_file, key)
                 log.info("Uploaded %s → R2:%s", Path(local_file).name, key)
+    elif LOCAL_OUTPUTS:
+        log.info("LOCAL_OUTPUTS=1 — skipping R2 upload, outputs remain in %s", OUTPUT)
+
+    # Always clean up the temp AADR downloads when in R2 mode
+    if USE_R2:
         for tmp in _tmp_files:
             try:
                 tmp.unlink()

@@ -112,6 +112,17 @@ R2 was chosen for two reasons: zero egress fees (the AADR `.geno` file is read r
 
 **What R2 never stores:** the user's raw DNA file. That is read from the user's local disk at analysis time and stays there.
 
+### 2.4a Local-only runner — Python (`scripts/run_local.py`)
+
+A one-shot CLI for running the entire pipeline on a single individual without any Cloudflare *writes*. It:
+
+- Reads AADR reference data from R2 (read-only access — the dataset is public)
+- Sets `USE_R2=1 LOCAL_OUTPUTS=1` so the step scripts skip every R2 upload and read step-to-step handoff files from local disk
+- Sets `MODERN_DNA=<path>` so any DNA file can be analysed without renaming
+- Synthesises step1+2+3 outputs into a single `output/report_<label>.md`
+
+This is the right tool for personal analysis, ad-hoc experiments, and anything that should not touch the cloud. The daemon below is the production multi-user path.
+
 ### 2.4 Compute daemon — Python (`scripts/daemon.py`)
 
 A long-running process on the user's machine. Polls the Worker API every `POLL_INTERVAL` seconds, claims queued jobs, runs the three-step pipeline, and reports back.

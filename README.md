@@ -18,6 +18,16 @@ Compare your personal AncestryDNA results against ~19,000 ancient human genomes 
 
 For a full status snapshot see [`PROJECT_UPDATE_2026-05-17.txt`](PROJECT_UPDATE_2026-05-17.txt).
 
+## Run an analysis locally — no Cloudflare writes
+
+Once your `.env` is set up and the AADR is uploaded to R2 (see Quick Start below), you can analyse an individual entirely on your own machine. The AADR is *read* from R2 (so you don't need 7 GB locally) but every output stays on local disk, and the Worker API is never contacted:
+
+```bash
+venv/bin/python scripts/run_local.py --dna /path/to/your-AncestryDNA.txt --label myname
+```
+
+This runs all three pipeline steps (parse → haplogroups → similarity+PCA) and writes a combined human-readable report to `output/report_myname.md`. Per-step outputs land in `output/step1_rn/`, `output/step2_rn/`, `output/step3_rn/` — none of which are tracked by git.
+
 ## Quick start
 
 This assumes a Cloudflare account with R2 enabled and Wrangler installed (`npm install -g wrangler`).

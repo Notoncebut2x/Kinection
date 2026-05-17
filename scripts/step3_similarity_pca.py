@@ -43,6 +43,8 @@ import numpy as np
 # ---------------------------------------------------------------------------
 USE_R2 = os.environ.get('USE_R2', '').lower() in ('1', 'true', 'yes')
 JOB_ID = os.environ.get('JOB_ID', 'dev')
+# When set, do not upload outputs to R2 and read snp_overlap.tsv from local disk.
+LOCAL_OUTPUTS = os.environ.get('LOCAL_OUTPUTS', '').lower() in ('1', 'true', 'yes')
 
 # ---------------------------------------------------------------------------
 # Config
@@ -533,12 +535,17 @@ def main() -> None:
     _tmp_files: list[Path] = []
     if USE_R2:
         log.info("R2 mode: downloading input files for job %s", JOB_ID)
-        _overlap_path = r2_client.download_to_temp(
-            r2_client.output_key(JOB_ID, 'snp_overlap.tsv'), '.tsv'
-        )
         _ind_path  = r2_client.download_to_temp(r2_client.IND_KEY,  '.ind')
         _anno_path = r2_client.download_to_temp(r2_client.ANNO_KEY, '.anno')
-        _tmp_files = [_overlap_path, _ind_path, _anno_path]
+        _tmp_files = [_ind_path, _anno_path]
+        # Handoff file: read locally if outputs are kept local; otherwise fetch from R2.
+        if LOCAL_OUTPUTS:
+            _overlap_path = OVERLAP_TSV
+        else:
+            _overlap_path = r2_client.download_to_temp(
+                r2_client.output_key(JOB_ID, 'snp_overlap.tsv'), '.tsv'
+            )
+            _tmp_files.append(_overlap_path)
         geno = R2GenoFile.open(r2_client.GENO_KEY)
     else:
         _overlap_path = OVERLAP_TSV
@@ -803,9 +810,9 @@ def main() -> None:
     geno.close()
 
     # ------------------------------------------------------------------
-    # Upload outputs to R2 (R2 mode only)
+    # Upload outputs to R2 (R2 mode only, unless LOCAL_OUTPUTS=1)
     # ------------------------------------------------------------------
-    if USE_R2:
+    if USE_R2 and not LOCAL_OUTPUTS:
         output_files = [dist_path, pop_path, pca_path,
                         OUTPUT / "pca_variance_explained.json",
                         OUTPUT / "top_matches_report.md"]
@@ -814,6 +821,11 @@ def main() -> None:
                 key = r2_client.output_key(JOB_ID, Path(local_file).name)
                 r2_client.upload_file(local_file, key)
                 log.info("Uploaded %s → R2:%s", Path(local_file).name, key)
+    elif LOCAL_OUTPUTS:
+        log.info("LOCAL_OUTPUTS=1 — skipping R2 upload, outputs remain in %s", OUTPUT)
+
+    # Always clean up the temp AADR downloads when in R2 mode
+    if USE_R2:
         for tmp in _tmp_files:
             try:
                 tmp.unlink()
