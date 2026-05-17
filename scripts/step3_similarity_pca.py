@@ -30,12 +30,19 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 import time
 from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
+
+# ---------------------------------------------------------------------------
+# R2 / local mode switch
+# ---------------------------------------------------------------------------
+USE_R2 = os.environ.get('USE_R2', '').lower() in ('1', 'true', 'yes')
+JOB_ID = os.environ.get('JOB_ID', 'dev')
 
 # ---------------------------------------------------------------------------
 # Config
@@ -79,6 +86,9 @@ log = logging.getLogger(__name__)
 
 sys.path.insert(0, str(ROOT / "scripts"))
 from utils.parsers import parse_ind_file, parse_anno_file, GenoFile
+if USE_R2:
+    from utils import r2_client
+    from utils.r2_geno import R2GenoFile
 
 
 # ---------------------------------------------------------------------------
@@ -203,10 +213,8 @@ def compute_asd(
         chunk_dosages     = modern_dosages_auto[chunk_start:chunk_end]
         chunk_missing     = missing_mask[chunk_start:chunk_end]
 
-        # Read GENO rows once per chunk (shape: chunk_size × n_indiv)
-        rows = np.empty((chunk_size, n_indiv), dtype=np.uint8)
-        for i, snp_idx in enumerate(chunk_geno_idx):
-            rows[i] = geno.read_snp_row(snp_idx)
+        # Read all rows in this chunk with one range request (R2) or mmap reads (local)
+        rows = geno.read_chunk(chunk_geno_idx).view(np.uint8)
 
         # Ancient frequencies (chunk_size × n_indiv), 0.0 / 1.0 / nan
         ancient_freq = geno_to_freq[rows]
@@ -295,17 +303,20 @@ def compute_pca(
     # We use dosage coding: 0=hom_ref, 1=het, 2=hom_alt → convert GENO (0=ref,2=alt,3=miss)
     geno_to_dosage = np.array([0, 1, 2, -1], dtype=np.int8)
 
-    log.info("Building ancient genotype matrix...")
+    log.info("Building ancient genotype matrix (chunked reads)...")
     matrix = np.empty((n_pca_indiv, n_sub), dtype=np.float32)
     matrix[:] = np.nan
 
-    for j, snp_idx in enumerate(sub_geno_idx):
-        row = geno.read_snp_row(snp_idx)           # (n_indiv,) uint8
-        dosage = geno_to_dosage[row]               # (n_indiv,) int8
-        sub_row = dosage[pca_indiv_indices]        # (n_pca_indiv,) int8
-        sub_flt = sub_row.astype(np.float32)
-        sub_flt[sub_row < 0] = np.nan
-        matrix[:, j] = sub_flt
+    # Read in chunks of CHUNK_SIZE SNPs — one range request per chunk in R2 mode
+    for chunk_start in range(0, n_sub, CHUNK_SIZE):
+        chunk_end_j = min(chunk_start + CHUNK_SIZE, n_sub)
+        chunk_sub_idx = sub_geno_idx[chunk_start:chunk_end_j]
+
+        chunk_rows = geno.read_chunk(chunk_sub_idx)                        # (c, n_indiv) int8
+        chunk_dosage = geno_to_dosage[chunk_rows.view(np.uint8)]           # (c, n_indiv) int8
+        chunk_pca = chunk_dosage[:, pca_indiv_indices].astype(np.float32)  # (c, n_pca)
+        chunk_pca[chunk_pca < 0] = np.nan
+        matrix[:, chunk_start:chunk_end_j] = chunk_pca.T
 
     # Impute missing with column mean (simple imputation)
     log.info("Imputing missing values with column means...")
@@ -517,10 +528,29 @@ def main() -> None:
     log.info("=== Step 1.3 — Genome-wide SNP Similarity and PCA ===")
 
     # ------------------------------------------------------------------
+    # Resolve input paths (download from R2 to temp files if USE_R2)
+    # ------------------------------------------------------------------
+    _tmp_files: list[Path] = []
+    if USE_R2:
+        log.info("R2 mode: downloading input files for job %s", JOB_ID)
+        _overlap_path = r2_client.download_to_temp(
+            r2_client.output_key(JOB_ID, 'snp_overlap.tsv'), '.tsv'
+        )
+        _ind_path  = r2_client.download_to_temp(r2_client.IND_KEY,  '.ind')
+        _anno_path = r2_client.download_to_temp(r2_client.ANNO_KEY, '.anno')
+        _tmp_files = [_overlap_path, _ind_path, _anno_path]
+        geno = R2GenoFile.open(r2_client.GENO_KEY)
+    else:
+        _overlap_path = OVERLAP_TSV
+        _ind_path     = IND_FILE
+        _anno_path    = ANNO_FILE
+        geno = GenoFile.open(GENO_FILE)
+
+    # ------------------------------------------------------------------
     # 1. Load overlap SNPs
     # ------------------------------------------------------------------
     log.info("Loading SNP overlap table...")
-    geno_indices, modern_dosages, chroms = load_overlap(OVERLAP_TSV)
+    geno_indices, modern_dosages, chroms = load_overlap(_overlap_path)
     n_overlap = len(geno_indices)
     log.info("Overlap: %d SNPs", n_overlap)
 
@@ -528,16 +558,15 @@ def main() -> None:
     # 2. Load individual list and annotations
     # ------------------------------------------------------------------
     log.info("Loading individual list and annotations...")
-    individuals = parse_ind_file(IND_FILE)
-    anno        = parse_anno_file(ANNO_FILE)
+    individuals = parse_ind_file(_ind_path)
+    anno        = parse_anno_file(_anno_path)
     n_indiv     = len(individuals)
     log.info("%d individuals loaded", n_indiv)
 
     # ------------------------------------------------------------------
-    # 3. Open GENO file
+    # 3. GENO backend already opened above
     # ------------------------------------------------------------------
-    log.info("Opening GENO file...")
-    geno = GenoFile.open(GENO_FILE)
+    log.info("GENO backend: %s", "R2 (range requests)" if USE_R2 else "local mmap")
 
     # ------------------------------------------------------------------
     # 4. Compute pairwise allele-sharing distances
@@ -771,8 +800,27 @@ def main() -> None:
             print(f"    PC{i+1} = {mc[i]:+.3f}  (explains {var:.1%} of variance)")
     print("=" * 72 + "\n")
 
-    log.info("=== Step 1.3 complete in %.1f seconds ===", time.time() - t0)
     geno.close()
+
+    # ------------------------------------------------------------------
+    # Upload outputs to R2 (R2 mode only)
+    # ------------------------------------------------------------------
+    if USE_R2:
+        output_files = [dist_path, pop_path, pca_path,
+                        OUTPUT / "pca_variance_explained.json",
+                        OUTPUT / "top_matches_report.md"]
+        for local_file in output_files:
+            if Path(local_file).exists():
+                key = r2_client.output_key(JOB_ID, Path(local_file).name)
+                r2_client.upload_file(local_file, key)
+                log.info("Uploaded %s → R2:%s", Path(local_file).name, key)
+        for tmp in _tmp_files:
+            try:
+                tmp.unlink()
+            except Exception:
+                pass
+
+    log.info("=== Step 1.3 complete in %.1f seconds ===", time.time() - t0)
 
 
 if __name__ == "__main__":

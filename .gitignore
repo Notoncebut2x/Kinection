@@ -25,9 +25,10 @@ __pycache__/
 # Jupyter
 .ipynb_checkpoints/
 
-# Environment variables
+# Environment variables — keep the example, ignore real values
 .env
-.env.*
+.env.local
+.dev.vars
 
 # Editor
 .vscode/

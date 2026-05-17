@@ -24,7 +24,9 @@ what the problem was, what options were considered, what was chosen, and why.
 | [0004](0004-analysis-language-python.md) | Use Python for the analysis engine | Accepted | Phase 1 |
 | [0005](0005-palindromic-snp-exclusion.md) | Exclude palindromic SNPs during strand alignment | Accepted | Phase 1 |
 | [0006](0006-haplogroup-reference-databases.md) | Use ISOGG Y-DNA tree and PhyloTree B17 for haplogroup assignment | Accepted | Phase 1 |
-| [0007](0007-web-backend-fastapi.md) | Use FastAPI as the web backend framework | Proposed | Phase 2 |
-| [0008](0008-async-job-queue-celery-redis.md) | Use Celery with Redis for async job processing | Proposed | Phase 2 |
+| [0007](0007-web-backend-fastapi.md) | Use FastAPI as the web backend framework | Superseded by 0012 | Phase 2 |
+| [0008](0008-async-job-queue-celery-redis.md) | Use Celery with Redis for async job processing | Superseded by 0012 | Phase 2 |
 | [0009](0009-database-postgresql.md) | Use PostgreSQL as the application database | Proposed | Phase 2 |
 | [0010](0010-chunked-geno-processing.md) | Process GENO file in SNP-row chunks | Accepted | Phase 1 |
+| [0011](0011-cloudflare-r2-geno-storage.md) | Store AADR GENO file in Cloudflare R2, access via range requests | Accepted | Phase 2 |
+| [0012](0012-cloudflare-workers-api.md) | Use Cloudflare Workers as the web API layer | Accepted | Phase 2 |

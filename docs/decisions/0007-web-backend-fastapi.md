@@ -1,6 +1,6 @@
 # ADR-0007: Use FastAPI as the Web Backend Framework
 
-* Status: Proposed
+* Status: Superseded by [ADR-0012](0012-cloudflare-workers-api.md)
 * Date: 2026-04-21
 
 ## Context and Problem Statement

@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 import time
 from pathlib import Path
@@ -37,7 +38,13 @@ from pathlib import Path
 import numpy as np
 
 # ---------------------------------------------------------------------------
-# Paths
+# R2 / local mode switch
+# ---------------------------------------------------------------------------
+USE_R2 = os.environ.get('USE_R2', '').lower() in ('1', 'true', 'yes')
+JOB_ID = os.environ.get('JOB_ID', 'dev')
+
+# ---------------------------------------------------------------------------
+# Paths (used in local mode; ignored when USE_R2=1)
 # ---------------------------------------------------------------------------
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data" / "input_data"
@@ -74,6 +81,9 @@ from utils.parsers import (
     SNP,
     complement,
 )
+if USE_R2:
+    from utils import r2_client
+    from utils.r2_geno import R2GenoFile
 
 # ---------------------------------------------------------------------------
 # SNP file parser — handles both valid and missing/empty .snp files
@@ -208,13 +218,33 @@ def alleles_to_dosage(a1: str, a2: str, alt: str) -> int:
 def main() -> None:
     t0 = time.time()
     log.info("=== Step 1.1 — Data Parsing and Harmonisation ===")
-    log.info("Modern individual: %s", MODERN_INDV1.name)
+
+    # ------------------------------------------------------------------
+    # Resolve input paths (download from R2 to temp files if USE_R2)
+    # ------------------------------------------------------------------
+    _tmp_files: list[Path] = []
+    if USE_R2:
+        log.info("R2 mode: downloading input files for job %s", JOB_ID)
+        _modern_path = r2_client.download_to_temp(r2_client.upload_key(JOB_ID), '.txt')
+        _ind_path    = r2_client.download_to_temp(r2_client.IND_KEY,  '.ind')
+        _anno_path   = r2_client.download_to_temp(r2_client.ANNO_KEY, '.anno')
+        _snp_path    = r2_client.download_to_temp(r2_client.SNP_KEY,  '.snp')
+        _tmp_files   = [_modern_path, _ind_path, _anno_path, _snp_path]
+        geno = R2GenoFile.open(r2_client.GENO_KEY)
+    else:
+        _modern_path = MODERN_INDV1
+        _ind_path    = IND_FILE
+        _anno_path   = ANNO_FILE
+        _snp_path    = SNP_FILE
+        geno = GenoFile.open(GENO_FILE)
+
+    log.info("Modern individual: %s", _modern_path.name)
 
     # ------------------------------------------------------------------
     # 1. Parse modern individual
     # ------------------------------------------------------------------
     log.info("Parsing modern individual AncestryDNA file...")
-    modern_snps = parse_ancestry_dna(MODERN_INDV1)
+    modern_snps = parse_ancestry_dna(_modern_path)
 
     # Build position lookup: (chrom, position) → SNP
     # Chromosome labels are normalised by parse_ancestry_dna (24→Y, 26→MT, etc.)
@@ -234,10 +264,8 @@ def main() -> None:
     log.info("  Total: %d SNPs", len(modern_snps))
 
     # ------------------------------------------------------------------
-    # 2. Parse GENO header
+    # 2. GENO header already opened above
     # ------------------------------------------------------------------
-    log.info("Opening GENO binary file...")
-    geno = GenoFile.open(GENO_FILE)
     log.info(
         "GENO: %d individuals × %d SNPs  (%d bytes/SNP)",
         geno.n_indiv, geno.n_snps, geno.bytes_per_snp,
@@ -247,7 +275,7 @@ def main() -> None:
     # 3. Parse .ind file
     # ------------------------------------------------------------------
     log.info("Parsing .ind individual list...")
-    individuals = parse_ind_file(IND_FILE)
+    individuals = parse_ind_file(_ind_path)
     assert len(individuals) == geno.n_indiv, (
         f"Individual count mismatch: .ind has {len(individuals)}, "
         f"GENO header says {geno.n_indiv}"
@@ -257,7 +285,7 @@ def main() -> None:
     # 4. Parse .snp file (may be empty/corrupt)
     # ------------------------------------------------------------------
     log.info("Parsing .snp SNP manifest...")
-    snp_manifest = parse_snp_file(SNP_FILE)
+    snp_manifest = parse_snp_file(_snp_path)
 
     snp_overlap_rows = []      # will hold overlap records
     modern_encoded = None      # will hold encoded genotypes
@@ -370,7 +398,7 @@ def main() -> None:
     # 6. Parse .anno for individual metadata summary
     # ------------------------------------------------------------------
     log.info("Parsing .anno annotation file...")
-    anno = parse_anno_file(ANNO_FILE)
+    anno = parse_anno_file(_anno_path)
 
     # Summary stats on ancient dataset
     n_male = sum(1 for r in anno.values() if r.molecular_sex == "M")
@@ -440,6 +468,21 @@ def main() -> None:
     log.info("Wrote summary: %s", summary_path)
 
     geno.close()
+
+    # ------------------------------------------------------------------
+    # Upload outputs to R2 (R2 mode only)
+    # ------------------------------------------------------------------
+    if USE_R2:
+        for local_file in [tsv_path, npy_path, summary_path]:
+            if local_file and Path(local_file).exists():
+                key = r2_client.output_key(JOB_ID, Path(local_file).name)
+                r2_client.upload_file(local_file, key)
+                log.info("Uploaded %s → R2:%s", Path(local_file).name, key)
+        for tmp in _tmp_files:
+            try:
+                tmp.unlink()
+            except Exception:
+                pass
 
     log.info(
         "=== Step 1.1 complete in %.1f seconds ===", time.time() - t0

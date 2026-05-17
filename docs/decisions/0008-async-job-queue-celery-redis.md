@@ -1,6 +1,6 @@
 # ADR-0008: Use Celery with Redis for Async Analysis Job Processing
 
-* Status: Proposed
+* Status: Superseded by [ADR-0012](0012-cloudflare-workers-api.md) (Cloudflare Queues replaces Celery+Redis as the broker; Python compute workers remain but are triggered via HTTP by a Queue consumer Worker rather than consuming from Redis)
 * Date: 2026-04-21
 
 ## Context and Problem Statement

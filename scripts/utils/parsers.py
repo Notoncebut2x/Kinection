@@ -434,6 +434,19 @@ class GenoFile:
 
         return genotypes
 
+    def read_chunk(self, geno_indices: list | np.ndarray) -> np.ndarray:
+        """
+        Read multiple SNP rows at once. Returns (n, n_indiv) int8 array.
+
+        Provides the same interface as R2GenoFile.read_chunk() so the two
+        backends are interchangeable in the analysis scripts.
+        """
+        geno_indices = np.asarray(geno_indices, dtype=np.int32)
+        result = np.empty((len(geno_indices), self.n_indiv), dtype=np.int8)
+        for i, snp_idx in enumerate(geno_indices):
+            result[i] = self.read_snp_row(int(snp_idx))
+        return result
+
     def iter_snp_rows(self, snp_indices: list[int] | None = None) -> Iterator[tuple[int, np.ndarray]]:
         """
         Iterate over SNP rows, yielding (snp_index, genotype_array) tuples.

@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 import time
 from collections import defaultdict
@@ -36,7 +37,13 @@ from pathlib import Path
 import numpy as np
 
 # ---------------------------------------------------------------------------
-# Paths
+# R2 / local mode switch
+# ---------------------------------------------------------------------------
+USE_R2 = os.environ.get('USE_R2', '').lower() in ('1', 'true', 'yes')
+JOB_ID = os.environ.get('JOB_ID', 'dev')
+
+# ---------------------------------------------------------------------------
+# Paths (used in local mode; ignored when USE_R2=1)
 # ---------------------------------------------------------------------------
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data" / "input_data"
@@ -71,6 +78,9 @@ log = logging.getLogger(__name__)
 
 sys.path.insert(0, str(ROOT / "scripts"))
 from utils.parsers import parse_ancestry_dna, parse_anno_file, parse_ind_file, complement, GenoFile
+if USE_R2:
+    from utils import r2_client
+    from utils.r2_geno import R2GenoFile
 
 
 # ---------------------------------------------------------------------------
@@ -774,9 +784,11 @@ def compute_chrom_asd(
         modern_dosages >= 0, modern_dosages / 2.0, np.nan
     ).astype(np.float32)
 
-    for i, snp_idx in enumerate(geno_indices):
-        row = geno.read_snp_row(int(snp_idx))          # (n_indiv,) uint8
-        ancient_freq = geno_to_freq[row]               # (n_indiv,) float32
+    # Read all SNP rows in one chunk (Y/MT counts are small — a few hundred SNPs)
+    all_rows = geno.read_chunk(geno_indices)           # (n_snps, n_indiv) int8
+
+    for i, row in enumerate(all_rows):
+        ancient_freq = geno_to_freq[row.view(np.uint8) if row.dtype == np.int8 else row]
 
         mf = modern_freq[i]
         if np.isnan(mf):
@@ -851,6 +863,27 @@ def main() -> None:
     log.info("=== Step 1.2 — Haplogroup Assignment ===")
 
     # ------------------------------------------------------------------
+    # Resolve input paths (download from R2 to temp files if USE_R2)
+    # ------------------------------------------------------------------
+    _tmp_files: list[Path] = []
+    if USE_R2:
+        log.info("R2 mode: downloading input files for job %s", JOB_ID)
+        _modern_path  = r2_client.download_to_temp(r2_client.upload_key(JOB_ID), '.txt')
+        _anno_path    = r2_client.download_to_temp(r2_client.ANNO_KEY,  '.anno')
+        _ind_path     = r2_client.download_to_temp(r2_client.IND_KEY,   '.ind')
+        _overlap_path = r2_client.download_to_temp(
+            r2_client.output_key(JOB_ID, 'snp_overlap.tsv'), '.tsv'
+        )
+        _tmp_files = [_modern_path, _anno_path, _ind_path, _overlap_path]
+        geno_backend = R2GenoFile.open(r2_client.GENO_KEY)
+    else:
+        _modern_path  = MODERN_INDV1
+        _anno_path    = ANNO_FILE
+        _ind_path     = IND_FILE
+        _overlap_path = OVERLAP_TSV
+        geno_backend  = None  # opened later below
+
+    # ------------------------------------------------------------------
     # 1. Load marker databases
     # ------------------------------------------------------------------
     log.info("Loading haplogroup marker databases...")
@@ -866,7 +899,7 @@ def main() -> None:
     # 2. Parse modern individual
     # ------------------------------------------------------------------
     log.info("Parsing Individual 1 AncestryDNA file...")
-    modern_snps = parse_ancestry_dna(MODERN_INDV1)
+    modern_snps = parse_ancestry_dna(_modern_path)
 
     # Separate Y and MT SNPs
     y_snps: dict[str, tuple] = {}
@@ -922,7 +955,7 @@ def main() -> None:
     # 5. Parse ancient annotations and find haplogroup matches
     # ------------------------------------------------------------------
     log.info("Parsing ancient individual annotations...")
-    anno = parse_anno_file(ANNO_FILE)
+    anno = parse_anno_file(_anno_path)
 
     log.info(
         "Searching %d ancient individuals for haplogroup matches...",
@@ -976,11 +1009,11 @@ def main() -> None:
     # 8. Y-chromosome allele-sharing distance (paternal lineage)
     # ------------------------------------------------------------------
     log.info("Computing Y-chromosome ASD (paternal lineage)...")
-    y_geno_idx, y_modern_dos = load_chrom_snps(OVERLAP_TSV, "Y")
+    y_geno_idx, y_modern_dos = load_chrom_snps(_overlap_path, "Y")
     log.info("Y chromosome: %d SNPs in overlap", len(y_geno_idx))
 
-    individuals = parse_ind_file(IND_FILE)
-    geno = GenoFile.open(GENO_FILE)
+    individuals = parse_ind_file(_ind_path)
+    geno = geno_backend if USE_R2 else GenoFile.open(GENO_FILE)
 
     # Only compare to ancient males for Y
     male_mask = np.array(
@@ -1014,7 +1047,7 @@ def main() -> None:
     # 9. Mitochondrial allele-sharing distance (maternal lineage)
     # ------------------------------------------------------------------
     log.info("Computing mtDNA ASD (maternal lineage)...")
-    mt_geno_idx, mt_modern_dos = load_chrom_snps(OVERLAP_TSV, "MT")
+    mt_geno_idx, mt_modern_dos = load_chrom_snps(_overlap_path, "MT")
     log.info("MT chromosome: %d SNPs in overlap", len(mt_geno_idx))
 
     mt_sum, mt_count = compute_chrom_asd(geno, mt_geno_idx, mt_modern_dos)
@@ -1037,6 +1070,21 @@ def main() -> None:
     log.info("Wrote %d MT-ASD rows to %s", len(mt_rows), mt_dist_path)
 
     geno.close()
+
+    # ------------------------------------------------------------------
+    # Upload outputs to R2 (R2 mode only)
+    # ------------------------------------------------------------------
+    if USE_R2:
+        for local_file in [y_path, mt_path, tsv_path, report_path, y_dist_path, mt_dist_path]:
+            if Path(local_file).exists():
+                key = r2_client.output_key(JOB_ID, Path(local_file).name)
+                r2_client.upload_file(local_file, key)
+                log.info("Uploaded %s → R2:%s", Path(local_file).name, key)
+        for tmp in _tmp_files:
+            try:
+                tmp.unlink()
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # 10. Print top results to console
