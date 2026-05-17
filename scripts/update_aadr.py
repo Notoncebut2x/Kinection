@@ -3,8 +3,9 @@ AADR dataset update checker and R2 uploader.
 
 Uses the Harvard Dataverse API to detect the latest AADR release, then
 streams the 1240K public dataset files directly into R2 without writing
-them to local disk. Also patches scripts/utils/r2_client.py so the
-analysis pipeline automatically uses the new version.
+them to local disk. Writes a manifest at dataset/current_version.json
+which r2_client.py reads at runtime — restart the daemon to pick up
+the new version.
 
 Usage:
   python scripts/update_aadr.py              # check and upload if newer
@@ -50,11 +51,9 @@ AADR_FILE_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Manifest key in R2 — tracks current version and file paths
+# Manifest key in R2 — tracks current version and file paths.
+# r2_client.py reads this at runtime, so no source patching is needed.
 VERSION_MANIFEST_KEY = "dataset/current_version.json"
-
-# Path to patch when version changes
-R2_CLIENT_PATH = Path(__file__).parent / "utils" / "r2_client.py"
 
 
 # ---------------------------------------------------------------------------
@@ -133,38 +132,6 @@ def write_manifest(version: str, files: list[dict]) -> None:
         "application/json",
     )
     log.info("manifest written → %s", VERSION_MANIFEST_KEY)
-
-
-# ---------------------------------------------------------------------------
-# Patch r2_client.py with new version constants
-# ---------------------------------------------------------------------------
-
-def patch_r2_client(version: str, files: list[dict]) -> None:
-    """Update DATASET_PREFIX and file key constants in r2_client.py."""
-    source = R2_CLIENT_PATH.read_text()
-
-    by_ext = {Path(f["filename"]).suffix.lstrip("."): f["filename"] for f in files}
-    prefix = f"dataset/{version}"
-
-    # Replace DATASET_PREFIX
-    source = re.sub(
-        r"(DATASET_PREFIX\s*=\s*)['\"]dataset/v[\w.]+['\"]",
-        f"\\1'{prefix}'",
-        source,
-    )
-    # Replace individual key values
-    for ext, const in [("geno", "GENO_KEY"), ("ind", "IND_KEY"),
-                       ("anno", "ANNO_KEY"), ("snp", "SNP_KEY")]:
-        if ext in by_ext:
-            new_key = f"{prefix}/{by_ext[ext]}"
-            source = re.sub(
-                rf"({const}\s*=\s*)['\"][^'\"]+['\"]",
-                f"\\1'{new_key}'",
-                source,
-            )
-
-    R2_CLIENT_PATH.write_text(source)
-    log.info("patched r2_client.py → %s", version)
 
 
 # ---------------------------------------------------------------------------
@@ -264,8 +231,7 @@ def main() -> None:
         stream_to_r2(f["file_id"], f["filename"], target, f["size_bytes"])
 
     write_manifest(target, files)
-    patch_r2_client(target, files)
-    log.info("All done. R2 and r2_client.py are now at %s.", target)
+    log.info("All done. R2 is now at %s. Restart the daemon to pick up the new version.", target)
 
 
 if __name__ == "__main__":

@@ -44,6 +44,11 @@ export default {
     const { pathname } = url;
 
     try {
+      // GET /dataset/version — public, returns current AADR manifest (KV-cached)
+      if (request.method === "GET" && pathname === "/dataset/version") {
+        return handleDatasetVersion(env);
+      }
+
       // POST /jobs — web app creates a new job
       if (request.method === "POST" && pathname === "/jobs") {
         return handleCreateJob(env);
@@ -79,6 +84,43 @@ export default {
     }
   },
 };
+
+const DATASET_VERSION_KEY = "dataset/current_version.json";
+const DATASET_VERSION_KV_KEY = "aadr_version_manifest";
+const DATASET_VERSION_TTL_SECONDS = 300;
+
+async function handleDatasetVersion(env: Env): Promise<Response> {
+  // Fast path: KV edge cache
+  const cached = await env.MARKER_CACHE.get(DATASET_VERSION_KV_KEY, "text");
+  if (cached) {
+    return new Response(cached, {
+      headers: {
+        ...CORS_HEADERS,
+        "Content-Type": "application/json",
+        "X-Cache": "HIT",
+      },
+    });
+  }
+
+  // Slow path: read from R2, populate cache
+  const object = await env.R2.get(DATASET_VERSION_KEY);
+  if (!object) {
+    return err("Dataset version manifest not found in R2", 404);
+  }
+
+  const text = await object.text();
+  await env.MARKER_CACHE.put(DATASET_VERSION_KV_KEY, text, {
+    expirationTtl: DATASET_VERSION_TTL_SECONDS,
+  });
+
+  return new Response(text, {
+    headers: {
+      ...CORS_HEADERS,
+      "Content-Type": "application/json",
+      "X-Cache": "MISS",
+    },
+  });
+}
 
 async function handleCreateJob(env: Env): Promise<Response> {
   const id = crypto.randomUUID();

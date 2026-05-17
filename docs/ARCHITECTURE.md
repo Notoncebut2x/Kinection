@@ -55,6 +55,7 @@ A stateless HTTP API at the edge. It is the only public-facing component.
 
 | Method | Path | Auth | Caller | Purpose |
 |---|---|---|---|---|
+| `GET` | `/dataset/version` | — | Web client | Current AADR version (KV-cached) |
 | `POST` | `/jobs` | — | Web client | Create a new analysis job |
 | `GET` | `/jobs?status=queued` | Bearer | Daemon | Poll for pending jobs |
 | `GET` | `/jobs/:id` | — | Web client | Read job status |
@@ -282,8 +283,7 @@ See [README.md](../README.md) for the user-facing version.
 
 These are known to be incomplete or under-built:
 
-- **KV marker cache** — declared in `wrangler.toml`; not yet read by the Worker. The Y-DNA and mtDNA marker JSONs would be a natural fit (small, hot, read-only).
 - **Result URL signing** — `GET /jobs/:id/results/:filename` currently has no rate limit and serves anyone with the job UUID. For a public deployment, this should issue short-lived R2 signed URLs instead of streaming through the Worker.
-- **r2_client.py dynamic version** — `update_aadr.py` patches `r2_client.py` via regex; a runtime read of `dataset/current_version.json` would remove that fragility.
 - **Daemon parallelism** — the daemon processes one job at a time. Fine for personal use; needs revisiting for multi-user beta.
 - **PII retention** — there is no automatic deletion of job rows in D1 or output files in R2. A retention/cleanup ADR is needed before any public launch.
+- **Extending KV use** — currently only the version manifest is KV-cached. Y-DNA and mtDNA marker JSONs could also be cached if/when the daemon stops bundling them locally.
