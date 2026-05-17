@@ -111,11 +111,16 @@ def build_report(label: str, run_started: datetime) -> str:
 
     if step1_summary:
         lines.append("**Data overlap:**")
-        for k in ("modern_snps", "ancient_snps", "overlap_snps",
-                  "palindromic_excluded", "final_snps"):
-            v = step1_summary.get(k)
-            if v is not None:
-                lines.append(f"- {k.replace('_', ' ').capitalize()}: **{v:,}**")
+        modern = step1_summary.get("modern_individual", {})
+        ancient = step1_summary.get("ancient_dataset", {})
+        overlap = step1_summary.get("overlap", {})
+        if "total_snps" in modern:
+            lines.append(f"- Modern individual SNPs: **{modern['total_snps']:,}**")
+        if "n_snps_geno_header" in ancient:
+            lines.append(f"- Ancient dataset SNPs: **{ancient['n_snps_geno_header']:,}** "
+                         f"across **{ancient.get('n_individuals', 0):,}** individuals")
+        if "n_overlap_snps" in overlap:
+            lines.append(f"- Overlapping SNPs (post-palindromic-filter): **{overlap['n_overlap_snps']:,}**")
         lines.append("")
 
     lines.append("---")
@@ -221,18 +226,28 @@ def main() -> None:
     run_started = datetime.now()
     job_label = f"local-{run_started:%Y%m%d-%H%M%S}"
 
+    # Auto-detect whether AADR is available on local disk. If so, use local
+    # files (faster, fully offline, no R2 access at all). Otherwise read
+    # from R2 via HTTP range requests.
+    aadr_local = ROOT / "data" / "input_data"
+    have_local_aadr = all(
+        any(aadr_local.glob(f"v*_1240k_public.{ext}")) or
+        any(aadr_local.glob(f"v*.1240K.aadr.PUB.{ext}"))
+        for ext in ("geno", "ind", "anno")
+    )
+
     env = {
         **os.environ,
-        "USE_R2": "1",
         "LOCAL_OUTPUTS": "1",
         "JOB_ID": job_label,
+        "USE_R2": "0" if have_local_aadr else "1",
     }
     if args.dna:
         env["MODERN_DNA"] = str(Path(args.dna).expanduser().resolve())
 
     print(f"Job label   : {job_label}")
-    print(f"DNA file    : {env.get('MODERN_DNA', '(default)')}")
-    print(f"AADR source : R2 (read-only)")
+    print(f"DNA file    : {env.get('MODERN_DNA', '(default: data/input_data/AncestryDNA_rn.txt)')}")
+    print(f"AADR source : {'local disk (no R2 access)' if have_local_aadr else 'R2 (read-only)'}")
     print(f"Outputs     : local only (no Cloudflare writes)")
 
     t0 = time.time()

@@ -52,7 +52,10 @@ LOCAL_OUTPUTS = os.environ.get('LOCAL_OUTPUTS', '').lower() in ('1', 'true', 'ye
 MIN_INDIV_SNPS   = 10_000   # min overlap SNPs to include an individual in population stats
 MIN_PCA_SNPS     = 100_000  # min 1240k SNPs (from .anno) to include individual in PCA
 PCA_N_COMPONENTS = 10
-PCA_SNP_SUBSAMPLE = 100_000  # subsample SNPs for PCA to manage memory
+# Subsample SNPs used for PCA — peak memory is roughly
+#   n_individuals * PCA_SNP_SUBSAMPLE * 4 bytes (float32)
+# 30k SNPs × ~14k individuals ≈ 1.6 GB. Override via env if you have RAM to spare.
+PCA_SNP_SUBSAMPLE = int(os.environ.get('PCA_SNP_SUBSAMPLE', '30000'))
 CHUNK_SIZE       = 5_000     # SNPs per processing chunk
 N_PSEUDO_DRAWS   = 10        # pseudo-haploid draws to average for ASD stability
 AUTOSOME_CHROMS  = {str(i) for i in range(1, 23)}  # chr 1-22 only for ASD
