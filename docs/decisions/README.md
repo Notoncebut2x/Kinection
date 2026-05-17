@@ -5,6 +5,10 @@ This directory contains Architecture Decision Records (ADRs) in [MADR format](ht
 Each record documents a significant technical or architectural choice made in the project:
 what the problem was, what options were considered, what was chosen, and why.
 
+For a system-level overview, see [`../ARCHITECTURE.md`](../ARCHITECTURE.md).
+For the science behind the pipeline, see [`../SCIENCE.md`](../SCIENCE.md).
+For the security posture, see [`../SECURITY.md`](../SECURITY.md).
+
 ## Status legend
 
 | Status    | Meaning |

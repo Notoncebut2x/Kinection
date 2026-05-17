@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# Kinection pre-commit hook — blocks commits containing credentials,
+# personal genetic data, or accidentally tracked large binaries.
+#
+# Enable per clone with:
+#   git config core.hooksPath .githooks
+#
+# To bypass intentionally:
+#   git commit --no-verify
+
+set -euo pipefail
+
+ERRORS=0
+
+red()   { printf "\033[31m✘  %s\033[0m\n" "$*"; }
+green() { printf "\033[32m✔  %s\033[0m\n" "$*"; }
+
+# All names of files staged for commit (Added, Copied, Modified, Renamed)
+STAGED=$(git diff --cached --name-only --diff-filter=ACMR || true)
+[ -z "${STAGED}" ] && { green "Pre-commit checks passed (no staged files)."; exit 0; }
+
+# ---------------------------------------------------------------------------
+# 1. Block personal genetic data paths
+# ---------------------------------------------------------------------------
+FORBIDDEN_PATHS=$(printf "%s\n" "${STAGED}" | grep -E "^(output/|data/input_data/)" || true)
+if [ -n "${FORBIDDEN_PATHS}" ]; then
+  red "Personal genetic data must never be committed:"
+  printf "    %s\n" ${FORBIDDEN_PATHS}
+  ERRORS=$((ERRORS + 1))
+fi
+
+# ---------------------------------------------------------------------------
+# 2. Block .env files (only .env.example is permitted)
+# ---------------------------------------------------------------------------
+ENV_FILES=$(printf "%s\n" "${STAGED}" | grep -E "(^|/)\.env(\.|$)" | grep -v "\.env\.example$" || true)
+if [ -n "${ENV_FILES}" ]; then
+  red "Environment files with real credentials must never be committed:"
+  printf "    %s\n" ${ENV_FILES}
+  ERRORS=$((ERRORS + 1))
+fi
+
+# ---------------------------------------------------------------------------
+# 3. Block .dev.vars (wrangler local secrets)
+# ---------------------------------------------------------------------------
+DEV_VARS=$(printf "%s\n" "${STAGED}" | grep -E "\.dev\.vars$" || true)
+if [ -n "${DEV_VARS}" ]; then
+  red "Wrangler .dev.vars files contain secrets and must never be committed:"
+  printf "    %s\n" ${DEV_VARS}
+  ERRORS=$((ERRORS + 1))
+fi
+
+# ---------------------------------------------------------------------------
+# 4. Scan staged content for credential patterns
+# ---------------------------------------------------------------------------
+# Look for "key=value" patterns where value is suspicious-looking.
+# We scan the staged blob (git show :file), not the worktree, so partially
+# staged hunks behave correctly.
+CRED_PATTERN='(R2_SECRET_ACCESS_KEY|R2_ACCESS_KEY_ID|COMPUTE_API_KEY|AWS_SECRET_ACCESS_KEY|aws_secret_access_key|api[_-]?key|secret[_-]?key|password)[[:space:]]*[:=][[:space:]]*["'\'']?[A-Za-z0-9/+_-]{16,}'
+
+# Skip binary/data extensions
+SCANNABLE=$(printf "%s\n" "${STAGED}" | grep -viE "\.(png|jpg|jpeg|gif|ico|pdf|npy|pkl|geno|ind|snp|anno|woff2?|ttf|otf|zip|tar|gz)$" || true)
+
+if [ -n "${SCANNABLE}" ]; then
+  while IFS= read -r file; do
+    [ -z "${file}" ] && continue
+    # The staged version of the file (handles partial-staged hunks)
+    if git show ":${file}" 2>/dev/null | grep -nEi "${CRED_PATTERN}" >/dev/null; then
+      red "Possible credential in staged ${file}:"
+      git show ":${file}" | grep -nEi "${CRED_PATTERN}" | head -5 | sed 's/^/    /'
+      ERRORS=$((ERRORS + 1))
+    fi
+  done <<< "${SCANNABLE}"
+fi
+
+# ---------------------------------------------------------------------------
+# 5. Block large files (>10 MB)
+# ---------------------------------------------------------------------------
+while IFS= read -r file; do
+  [ -z "${file}" ] && continue
+  [ -f "${file}" ] || continue
+  SIZE=$(wc -c < "${file}" | tr -d ' ')
+  if [ "${SIZE}" -gt 10485760 ]; then
+    MB=$(( SIZE / 1024 / 1024 ))
+    red "Large file staged: ${file} (${MB} MB). Move it out of git or use Git LFS."
+    ERRORS=$((ERRORS + 1))
+  fi
+done <<< "${STAGED}"
+
+# ---------------------------------------------------------------------------
+if [ "${ERRORS}" -gt 0 ]; then
+  echo ""
+  echo "  Commit blocked — ${ERRORS} issue(s) found."
+  echo "  To bypass in a genuine emergency: git commit --no-verify"
+  exit 1
+fi
+
+green "Pre-commit checks passed."
+exit 0
