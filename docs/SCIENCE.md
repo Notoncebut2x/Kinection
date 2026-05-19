@@ -1,6 +1,6 @@
 # Kinection — The Science, in Plain English
 
-*Last updated: 2026-05-17*
+*Last updated: 2026-05-18*
 
 This document explains what each step of the analysis pipeline actually does, why it works, and what the results mean — without assuming a background in population genetics.
 
@@ -50,7 +50,7 @@ The pipeline handles all three.
 
 **Why we use it:** It's the only comprehensive, professionally-curated resource of ancient genomes. Crucially, the labels (date, location, archaeological culture) are reviewed and standardized. You can't reproduce this work yourself by trawling Genbank.
 
-**Versioning:** New releases come out a few times a year as more skeletons are sequenced. Current: v66 (released April 2026). `scripts/update_aadr.py` checks Harvard Dataverse for new releases and updates the cloud copy.
+**Versioning:** New releases come out a few times a year as more skeletons are sequenced. Current cloud version: **v66** (~7.2 GB .geno, in Cloudflare R2 at `dataset/v66/`). A v62 copy is also kept on local disk for fully-offline runs. `scripts/update_aadr.py` checks Harvard Dataverse for new releases and updates the cloud copy; the runtime resolves which version to use from the manifest at `dataset/current_version.json`.
 
 See [ADR-0001](decisions/0001-reference-dataset-aadr-v62.md) for the formal decision record.
 
@@ -80,7 +80,7 @@ Three problems have to be solved before any comparison is possible:
 - `step1_summary.json` — quick stats: how many SNPs overlapped, how many were palindromic and excluded, how many you had genotypes for
 - `modern_indv_encoded.npy` — your genotypes as a compact NumPy array (input to steps 2 and 3)
 
-Typical surviving overlap after the palindromic filter is in the range of 350,000–400,000 SNPs for an AncestryDNA V2 array — well above what most population genetics studies work with.
+Typical surviving overlap after the palindromic filter is in the range of 400,000–410,000 SNPs for an AncestryDNA V2 array against AADR v62 — well above what most population genetics studies work with.
 
 See [ADR-0005](decisions/0005-palindromic-snp-exclusion.md) for the palindromic exclusion decision.
 
@@ -174,7 +174,12 @@ The script projects *you* into that ancient-only space (your genome is held out 
 
 ### Why this takes a while
 
-The AADR `.geno` file is ~7 GB. We read it via HTTP byte-range requests directly from R2 — fetching only the SNP rows we need, in 5,000-row chunks. Total runtime is around 10–20 minutes on a normal connection. See [ADR-0010](decisions/0010-chunked-geno-processing.md) and [ADR-0011](decisions/0011-cloudflare-r2-geno-storage.md).
+The AADR `.geno` file is ~5–7 GB (v62: 5.4 GB, v66: 7.2 GB). The pipeline can read it two ways:
+
+- **From R2:** HTTP byte-range requests fetch only the SNP rows we need, in 5,000-row chunks. Runtime ~10–20 minutes depending on connection.
+- **From local disk:** if `data/input_data/v*_1240k_public.{geno,ind,anno}` are present, `run_local.py` auto-detects them and skips R2 entirely. Full pipeline (steps 1, 2, 3, 1.5) runs in ~4 minutes end-to-end on a normal laptop.
+
+See [ADR-0010](decisions/0010-chunked-geno-processing.md) and [ADR-0011](decisions/0011-cloudflare-r2-geno-storage.md).
 
 ### What you get
 

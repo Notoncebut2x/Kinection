@@ -45,6 +45,8 @@ USE_R2 = os.environ.get('USE_R2', '').lower() in ('1', 'true', 'yes')
 JOB_ID = os.environ.get('JOB_ID', 'dev')
 # When set, do not upload outputs to R2 and read snp_overlap.tsv from local disk.
 LOCAL_OUTPUTS = os.environ.get('LOCAL_OUTPUTS', '').lower() in ('1', 'true', 'yes')
+# Suffix used for output and handoff paths; must match the value used in step 1.
+OUTPUT_LABEL = os.environ.get('OUTPUT_LABEL', 'rn')
 
 # ---------------------------------------------------------------------------
 # Config
@@ -65,15 +67,15 @@ AUTOSOME_CHROMS  = {str(i) for i in range(1, 23)}  # chr 1-22 only for ASD
 # ---------------------------------------------------------------------------
 ROOT   = Path(__file__).resolve().parent.parent
 DATA   = ROOT / "data" / "input_data"
-OUT1   = ROOT / "output" / "step1_rn"
-OUTPUT = ROOT / "output" / "step3_rn"
+OUT1   = ROOT / "output" / f"step1_{OUTPUT_LABEL}"
+OUTPUT = ROOT / "output" / f"step3_{OUTPUT_LABEL}"
 OUTPUT.mkdir(parents=True, exist_ok=True)
 
 GENO_FILE = DATA / "v62.0_1240k_public.geno"
 IND_FILE  = DATA / "v62.0_1240k_public.ind"
 ANNO_FILE = DATA / "v62.0_1240k_public.anno"
 OVERLAP_TSV = OUT1 / "snp_overlap.tsv"
-MODERN_NPY  = OUT1 / "modern_indv_rn_encoded.npy"
+MODERN_NPY  = OUT1 / f"modern_indv_{OUTPUT_LABEL}_encoded.npy"
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -192,8 +194,13 @@ def compute_asd(
     # Missing mask (consistent across draws)
     missing_mask = (modern_dosages_auto < 0)
 
-    # GENO value → pseudo-haploid alt allele (0 or 1); ancient het treated as 0.5
-    geno_to_freq = np.array([0.0, 0.5, 1.0, np.nan], dtype=np.float32)
+    # AADR PACKGENO: 0 = hom allele2 (col 6 of .snp), 2 = hom allele1 (col 5).
+    # Step 1's `dosage` counts allele2 in modern, so modern_freq=dosage/2 is
+    # "allele2 frequency". To compare like-with-like we map ancient geno to
+    # ancient allele2-frequency: geno 0 -> 1.0, geno 2 -> 0.0, het -> 0.5,
+    # missing -> nan. Without this inversion, identical samples register as
+    # maximum distance — see ADR 0014.
+    geno_to_freq = np.array([1.0, 0.5, 0.0, np.nan], dtype=np.float32)
 
     n_chunks = (n_snps + CHUNK_SIZE - 1) // CHUNK_SIZE
 
@@ -304,9 +311,12 @@ def compute_pca(
     n_sub = len(sub_idx)
     log.info("PCA: using %d SNPs (every %d-th overlap SNP)", n_sub, step)
 
-    # Build matrix: (n_pca_indiv, n_sub) of alt dosage (0/1/2, -1=missing)
-    # We use dosage coding: 0=hom_ref, 1=het, 2=hom_alt → convert GENO (0=ref,2=alt,3=miss)
-    geno_to_dosage = np.array([0, 1, 2, -1], dtype=np.int8)
+    # Build matrix: (n_pca_indiv, n_sub) of allele2 dosage (0/1/2, -1=missing).
+    # AADR PACKGENO: geno 0 = hom allele2 -> dosage 2; geno 2 = hom allele1
+    # -> dosage 0; geno 1 = het -> dosage 1; geno 3 = missing -> -1.
+    # This matches step 1's modern dosage convention (count of allele2 in modern)
+    # so modern projection is on the same axes as the ancient PCA — see ADR 0014.
+    geno_to_dosage = np.array([2, 1, 0, -1], dtype=np.int8)
 
     log.info("Building ancient genotype matrix (chunked reads)...")
     matrix = np.empty((n_pca_indiv, n_sub), dtype=np.float32)
@@ -754,7 +764,7 @@ def main() -> None:
                 )
             # Write Individual 1
             modern_pc = "\t".join(f"{modern_coords[k]:.4f}" for k in range(n_pc))
-            fh.write(f"modern_indv_rn\tIndividual_RN\tModern_Individual_RN\t0\t\t\t{modern_pc}\n")
+            fh.write(f"modern_indv_{OUTPUT_LABEL}\tIndividual_{OUTPUT_LABEL.upper()}\tModern_Individual_{OUTPUT_LABEL.upper()}\t0\t\t\t{modern_pc}\n")
 
         # Write variance explained as JSON
         with open(OUTPUT / "pca_variance_explained.json", "w") as fh:

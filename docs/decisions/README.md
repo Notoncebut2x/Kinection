@@ -35,3 +35,4 @@ For the security posture, see [`../SECURITY.md`](../SECURITY.md).
 | [0011](0011-cloudflare-r2-geno-storage.md) | Store AADR GENO file in Cloudflare R2, access via range requests | Accepted | Phase 2 |
 | [0012](0012-cloudflare-workers-api.md) | Use Cloudflare Workers as the web API layer | Accepted | Phase 2 |
 | [0013](0013-admixture-nnls.md) | Admixture decomposition via constrained NNLS | Accepted | Phase 1 |
+| [0014](0014-encoding-and-tmrca-calibration.md) | AADR PACKGENO encoding convention and Y-DNA TMRCA calibration | Accepted | Phase 1 |

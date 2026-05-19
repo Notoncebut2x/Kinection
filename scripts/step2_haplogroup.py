@@ -43,13 +43,15 @@ USE_R2 = os.environ.get('USE_R2', '').lower() in ('1', 'true', 'yes')
 JOB_ID = os.environ.get('JOB_ID', 'dev')
 # When set, do not upload outputs to R2 and read snp_overlap.tsv from local disk.
 LOCAL_OUTPUTS = os.environ.get('LOCAL_OUTPUTS', '').lower() in ('1', 'true', 'yes')
+# Suffix used for output and handoff paths; must match the value used in step 1.
+OUTPUT_LABEL = os.environ.get('OUTPUT_LABEL', 'rn')
 
 # ---------------------------------------------------------------------------
 # Paths (used in local mode; ignored when USE_R2=1)
 # ---------------------------------------------------------------------------
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data" / "input_data"
-OUTPUT = ROOT / "output" / "step2_rn"
+OUTPUT = ROOT / "output" / f"step2_{OUTPUT_LABEL}"
 OUTPUT.mkdir(parents=True, exist_ok=True)
 
 MODERN_INDV1  = DATA / "AncestryDNA_rn.txt"
@@ -58,7 +60,7 @@ YDNA_MARKERS  = ROOT / "scripts" / "data" / "ydna_markers.json"
 MTDNA_MARKERS = ROOT / "scripts" / "data" / "mtdna_markers.json"
 GENO_FILE     = DATA / "v62.0_1240k_public.geno"
 IND_FILE      = DATA / "v62.0_1240k_public.ind"
-OVERLAP_TSV   = ROOT / "output" / "step1_rn" / "snp_overlap.tsv"
+OVERLAP_TSV   = ROOT / "output" / f"step1_{OUTPUT_LABEL}" / "snp_overlap.tsv"
 
 # Min SNPs required for a Y or MT distance to be reported
 MIN_Y_SNPS  = 10

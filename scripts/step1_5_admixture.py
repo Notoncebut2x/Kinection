@@ -50,11 +50,13 @@ import numpy as np
 USE_R2 = os.environ.get('USE_R2', '').lower() in ('1', 'true', 'yes')
 JOB_ID = os.environ.get('JOB_ID', 'dev')
 LOCAL_OUTPUTS = os.environ.get('LOCAL_OUTPUTS', '').lower() in ('1', 'true', 'yes')
+# Suffix used for output and handoff paths; must match the value used in step 1.
+OUTPUT_LABEL = os.environ.get('OUTPUT_LABEL', 'rn')
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data" / "input_data"
-OUT1 = ROOT / "output" / "step1_rn"
-OUTPUT = ROOT / "output" / "step1_5_rn"
+OUT1 = ROOT / "output" / f"step1_{OUTPUT_LABEL}"
+OUTPUT = ROOT / "output" / f"step1_5_{OUTPUT_LABEL}"
 OUTPUT.mkdir(parents=True, exist_ok=True)
 
 # Local-mode input paths (mirror step 3 conventions)

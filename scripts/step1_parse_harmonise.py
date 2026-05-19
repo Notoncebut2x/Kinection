@@ -45,13 +45,16 @@ JOB_ID = os.environ.get('JOB_ID', 'dev')
 # When set, do not upload outputs to R2 — keep everything on local disk.
 # Useful for "run analysis fully locally; AADR still streamed from R2".
 LOCAL_OUTPUTS = os.environ.get('LOCAL_OUTPUTS', '').lower() in ('1', 'true', 'yes')
+# Suffix used for the output directory (output/step1_<LABEL>/) and the
+# encoded genotypes filename. Defaults to "rn" for backward compatibility.
+OUTPUT_LABEL = os.environ.get('OUTPUT_LABEL', 'rn')
 
 # ---------------------------------------------------------------------------
 # Paths (used in local mode; ignored when USE_R2=1)
 # ---------------------------------------------------------------------------
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data" / "input_data"
-OUTPUT = ROOT / "output" / "step1_rn"
+OUTPUT = ROOT / "output" / f"step1_{OUTPUT_LABEL}"
 OUTPUT.mkdir(parents=True, exist_ok=True)
 
 MODERN_INDV1 = DATA / "AncestryDNA_rn.txt"
@@ -392,7 +395,7 @@ def main() -> None:
             [d if d is not None else -1 for _, _, _, d in overlap_records],
             dtype=np.int8,
         )
-        npy_path = OUTPUT / "modern_indv_rn_encoded.npy"
+        npy_path = OUTPUT / f"modern_indv_{OUTPUT_LABEL}_encoded.npy"
         np.save(npy_path, dosage_values)
         log.info("Saved encoded genotypes: %s  (%d SNPs)", npy_path, len(dosage_values))
 
@@ -434,7 +437,7 @@ def main() -> None:
     summary = {
         "run_timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "inputs": {
-            "modern_individual": str(MODERN_INDV1),
+            "modern_individual": str(_modern_path),
             "geno_file": str(GENO_FILE),
             "ind_file": str(IND_FILE),
             "snp_file": str(SNP_FILE),
@@ -458,7 +461,7 @@ def main() -> None:
         "snp_file_status": "available" if snp_manifest else "missing_or_corrupt",
         "overlap": {
             "n_overlap_snps": len(snp_overlap_rows) if snp_overlap_rows else None,
-            "modern_encoded_path": str(OUTPUT / "modern_indv_rn_encoded.npy") if modern_encoded is not None else None,
+            "modern_encoded_path": str(OUTPUT / f"modern_indv_{OUTPUT_LABEL}_encoded.npy") if modern_encoded is not None else None,
         },
         "warnings": [] if snp_manifest else [
             "v62.0_1240k_public.snp is empty/corrupt — SNP coordinate overlap skipped. "

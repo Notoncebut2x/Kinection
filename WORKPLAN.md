@@ -1,9 +1,13 @@
 # DNA Lineage Platform — Workplan
 
 **Project:** Web platform for personal DNA comparison against ancient population datasets
-**Reference dataset:** Allen Ancient DNA Resource v62.0 (17,629 individuals, 406,570 SNPs)
+**Reference datasets:** Allen Ancient DNA Resource
+  - v62.0 — cached locally (`data/input_data/`), used for offline runs
+  - v66 — uploaded to Cloudflare R2 (`dataset/v66/`, 7.17 GB .geno), used for cloud runs
+**Pipeline version source:** R2 manifest at `dataset/current_version.json` (read at startup; restart to pick up new versions)
 **Methodology reference:** [Uniparental analysis of Deep Maniot Greeks, *Communications Biology* 2026](https://www.nature.com/articles/s42003-026-09597-9)
 **Started:** April 2026
+**Last updated:** May 2026
 
 ---
 
@@ -20,14 +24,21 @@ A web application where users upload their raw AncestryDNA, 23andMe, or similar 
 
 ## Input Data
 
+**Modern individuals (gitignored, local-only, never uploaded to cloud):**
+
 | File | Description |
 |------|-------------|
-| `data/input_data/modern_indvidual.txt` | Individual 1 — AncestryDNA V2.0 array, April 2025 |
-| `data/input_data/modern_indv_2.txt` | Individual 2 — AncestryDNA V1.0 array, July 2025 |
-| `data/input_data/v62.0_1240k_public.geno` | Ancient genotypes — binary EIGENSTRAT format |
-| `data/input_data/v62.0_1240k_public.ind` | Ancient individual metadata (17,629 individuals) |
-| `data/input_data/v62.0_1240k_public.snp` | SNP manifest (406,570 positions) |
-| `data/input_data/v62.0_1240k_public.anno` | Extended annotations (culture, date, region) |
+| `data/input_data/AncestryDNA_rn.txt` | Individual "rn" — AncestryDNA raw |
+| `data/input_data/AncestryDNA_jn.txt` | Individual "jn" — AncestryDNA raw |
+
+**Ancient reference dataset (v62 on disk, v66 in R2):**
+
+| File | Source | Description |
+|------|--------|-------------|
+| `v62.0_1240k_public.{geno,ind,snp,anno}` | `data/input_data/` | v62 — 17,629 individuals, ~5.5 GB |
+| `v66.1240K.aadr.PUB.{geno,ind,snp,anno}` | R2 `dataset/v66/` | v66 — 7.17 GB .geno, current cloud version |
+
+`run_local.py` auto-detects local AADR files and uses them offline; falls back to R2 when missing. `update_aadr.py` manages R2.
 
 ---
 
@@ -35,7 +46,20 @@ A web application where users upload their raw AncestryDNA, 23andMe, or similar 
 
 **Goal:** Implement lineage analysis methods matching the Deep Maniot study to compare Individual 1 against the full v62.0 ancient dataset and produce interpretable results. This phase is purely computational — no web interface.
 
+**Status overview:**
+
+| Step | Title | Status |
+|------|-------|--------|
+| 1.1 | Data Parsing & Harmonisation     | ✅ done — `scripts/step1_parse_harmonise.py` |
+| 1.2 | Haplogroup Assignment            | ✅ done — `scripts/step2_haplogroup.py` |
+| 1.3 | Genome-wide Similarity & PCA     | ✅ done — `scripts/step3_similarity_pca.py` |
+| 1.4 | TMRCA Estimation                 | ⬜ pending |
+| 1.5 | Admixture Decomposition (NNLS)   | ✅ done — `scripts/step1_5_admixture.py` (ADR 0013; replaces the original AMOVA scope) |
+| 1.6 | Interpretation & Report          | 🟡 partial — Markdown via `run_local.py`; structured JSON + geojson for map still TODO |
+
 ### Step 1.1 — Data Parsing and Harmonisation
+
+**Status:** ✅ Implemented in `scripts/step1_parse_harmonise.py`. Outputs land in `output/step1_<label>/` (per-individual).
 
 **Objective:** Convert Individual 1's AncestryDNA file and the EIGENSTRAT ancient dataset into a common representation for comparison.
 
@@ -60,6 +84,8 @@ A web application where users upload their raw AncestryDNA, 23andMe, or similar 
 ---
 
 ### Step 1.2 — Haplogroup Assignment
+
+**Status:** ✅ Implemented in `scripts/step2_haplogroup.py`. Outputs land in `output/step2_<label>/`.
 
 **Objective:** Determine Individual 1's Y-DNA (paternal) and mtDNA (maternal) haplogroup, placing them on the ancient phylogenetic tree exactly as done in the Deep Maniot study.
 
@@ -92,6 +118,8 @@ A web application where users upload their raw AncestryDNA, 23andMe, or similar 
 ---
 
 ### Step 1.3 — Genome-wide SNP Similarity and Population Affinity
+
+**Status:** ✅ Implemented in `scripts/step3_similarity_pca.py`. Outputs land in `output/step3_<label>/`.
 
 **Objective:** Beyond haplogroups, compute autosomal (whole-genome) similarity between Individual 1 and each ancient individual at the overlapping SNP set, identifying closest population-level matches.
 
@@ -140,19 +168,14 @@ A web application where users upload their raw AncestryDNA, 23andMe, or similar 
 
 ---
 
-### Step 1.5 — AMOVA and Population Structure
+### Step 1.5 — Admixture Decomposition (NNLS)  ✅ DONE
 
-**Objective:** Replicate the AMOVA (Analysis of Molecular Variance) approach from the Deep Maniot study to quantify how much of Individual 1's genetic variance is explained by different ancient populations and regions.
+**Objective:** Decompose the modern individual's autosomal ancestry into proportions of six ancient source populations (WHG, EHG, EEF, Steppe, Levant_N, Iran_N) using constrained non-negative least squares against population mean allele frequencies. See ADR 0013 for rationale (chose NNLS over qpAdm to avoid f-statistic complexity for v1).
 
-**Tasks:**
-- Select a panel of reference ancient populations (e.g., Anatolian Neolithic, European Bronze Age, Steppe, Caucasus, Levant, North Africa) from the `.anno` metadata
-- Run AMOVA partitioning genetic variance: within-individual, among-individuals-within-population, among-populations
-- Compute FST analogues between Individual 1 and each reference population group
-- Identify which ancient population groupings minimise residual variance for Individual 1
+**Implementation:** `scripts/step1_5_admixture.py`
+**Outputs:** `output/step1_5_<label>/admixture_decomposition.json`, `admixture_report.md`, `source_coverage.tsv`
 
-**Expected outputs:**
-- `output/step5/amova_results.tsv`
-- `output/step5/fst_table.tsv`
+**Future (not committed):** Add AMOVA / FST as Step 1.7 if needed for the report narrative.
 
 ---
 
@@ -179,13 +202,14 @@ A web application where users upload their raw AncestryDNA, 23andMe, or similar 
 
 ### Step 2.1 — Technology Stack Decision
 
-**Recommended stack:**
-- **Backend:** Python (FastAPI) — consistent with existing analysis codebase
-- **Frontend:** React + TypeScript with Tailwind CSS
-- **Database:** PostgreSQL (user accounts, upload metadata, cached results)
-- **File storage:** S3-compatible (uploads + results)
-- **Job queue:** Celery + Redis (async analysis jobs)
-- **Hosting:** AWS or Azure (review existing Azure infrastructure already in repo)
+**Decided stack (see ADRs 0011, 0012; supersedes 0007–0009):**
+- **API:** Cloudflare Workers (TypeScript) — `workers/api/`
+- **Analysis runner:** Local polling daemon (`scripts/daemon.py`) executing the Python pipeline. Replaced Celery+Redis (commit 7671584).
+- **Object storage:** Cloudflare R2 — AADR reference + per-job outputs (modern raw files NEVER stored here, per commit 9adabaf)
+- **Database:** Cloudflare D1 (SQLite) — job state, deletion receipts, user accounts (when added)
+- **KV:** Workers KV — caches the AADR version manifest
+- **Frontend:** React + TypeScript + Tailwind — not yet built
+- **ADRs to retire / mark superseded:** 0007 (FastAPI), 0008 (Celery+Redis), 0009 (PostgreSQL)
 
 ### Step 2.2 — System Architecture Design
 
@@ -224,7 +248,7 @@ All formats use rsID-based SNP identification; strand-alignment and overlap logi
 
 ### Step 3.2 — Pipeline Optimisation
 
-The v62.0 dataset is large (46 GB). For production:
+The AADR .geno is ~5–7 GB (v62: 5.4 GB, v66: 7.2 GB). For production:
 - Pre-compute a population-level SNP matrix (mean allele frequencies per population per SNP) to reduce per-user computation from O(17,629 individuals) to O(~450 populations)
 - Pre-compute PCA eigenvectors on the ancient dataset once; project each new user in without recomputing
 - Cache haplogroup reference trees in memory
@@ -277,6 +301,38 @@ Before running analysis, validate user input:
 - Do not share or sell genetic data under any circumstances
 - Separate personal identity from genetic data in the database (pseudonymisation)
 
+### Step 5.1.1 — Modern DNA Lifecycle: Upload, Analyse, Permanently Delete
+
+Treat the raw modern-individual file as the most sensitive object in the system. It must exist in the cloud only for the duration of analysis, and never appear in any log, transcript, or version-control artefact.
+
+**Upload (client → R2):**
+- Browser uploads directly to a per-job R2 key (e.g. `uploads/<job_id>/raw.txt`) via a short-lived presigned PUT URL minted by the Worker — the file never traverses the Worker, so Worker logs cannot capture it.
+- Presigned URL expires in ≤15 minutes; one-shot use enforced by job-state check.
+- Object is written with SSE-C or server-side encryption with a per-job key derived from the user's session (so a bucket-wide credential leak does not yield plaintext).
+- Set `Cache-Control: no-store` and a short R2 object-lock TTL as a defence-in-depth backstop in case post-analysis deletion fails.
+
+**During analysis:**
+- Worker / analysis runner reads the object via short-lived signed GETs scoped to that single key. No copies are made to other buckets or persistent local disk; if a runner needs disk, it uses an ephemeral tmpfs that is wiped on container teardown.
+- Derived artefacts (encoded genotypes, overlap tables) are stored under `outputs/<job_id>/` separately, so the raw file can be deleted independently of results.
+- Analysis logs must redact any line containing rsID-level genotype calls. Add a structured-logging filter that drops fields named `genotype`, `raw_line`, `allele1`, `allele2`, and similar; unit-test the filter against a sample raw line.
+
+**Post-analysis deletion (must run, must be verified):**
+- On successful analysis completion, issue `DeleteObject` against the raw key, then `HeadObject` to confirm 404. Persist a deletion receipt (timestamp, key, requestor) to D1.
+- On failure, retry deletion with exponential backoff; if it still fails after N retries, page on-call — never leave the file behind silently.
+- Run a daily reaper job that lists everything under `uploads/` older than the max-analysis-window (e.g. 24h) and force-deletes it. This is the backstop for crashed jobs that skipped the inline delete.
+- Allow users to trigger immediate deletion from the UI at any time, even mid-analysis (aborts the job).
+- Document and test that R2 does not retain object versions for the `uploads/` prefix (versioning OFF, or lifecycle rule purges noncurrent versions within 24h). A delete that leaves a recoverable version is not a delete.
+
+**Prevent leaks into git, chat, and logs:**
+- `.gitignore` already excludes `data/input_data/` and `output/` — keep it that way, and add a pre-commit hook that greps staged diffs for AncestryDNA-header signatures (`# AncestryDNA raw data`, `rsid\tchromosome\tposition\tallele1\tallele2`) and `rs\d+\t\d+\t\d+\t[ACGT0]\t[ACGT0]` patterns. Block the commit on match.
+- CI runs the same scanner on every PR.
+- Worker / runner code must never log raw request bodies. Add a lint rule or code-review checklist item.
+- When users (or developers) paste raw DNA into a chat with an AI assistant, the assistant should refuse to echo it back, and the file-handling code must never include raw genotype lines in error messages, exception traces, or telemetry payloads. Sanitise exceptions at the boundary.
+- Periodic audit: run `git log --all -p -S "AncestryDNA"` and a pickaxe search for `rs\d+\t\d+\t\d+` against history; if anything shows up, rewrite history with `git filter-repo` and force-push (coordinate with team).
+
+**Acceptance test for this step:**
+- End-to-end test: upload a synthetic raw file, run analysis to completion, assert `HeadObject` on the raw key returns 404, assert no log line in the job's log stream contains the synthetic file's known rsIDs, assert git history is clean.
+
 ### Step 5.2 — Consent Flow
 
 - Explicit informed consent before upload explaining: what data is collected, how it is used, where it is stored, who can access it, how to request deletion
@@ -314,16 +370,19 @@ Before running analysis, validate user input:
 
 ## Immediate Next Action
 
-**Start here:** `Phase 1 — Step 1.1` — parsing Individual 1's AncestryDNA file and the EIGENSTRAT ancient dataset, finding the SNP overlap, and encoding both into a common numerical format.
+**Recommended next step: Step 1.4 — TMRCA Estimation.**
+It is the highest-value remaining Phase 1 piece — turns "you are R-M269" into "your common ancestor with these ancient individuals lived ~X years ago", which is the narrative payoff of the whole report.
 
-The output of Step 1.1 is the foundation for all subsequent analysis steps. Nothing else in Phase 1 can proceed without a clean, strand-aligned SNP overlap.
+**Parallel tracks worth picking up next:**
+1. Step 1.6 finish — produce `report.json` + `map_data.geojson` from the existing run outputs so the future UI has structured input.
+2. Switch local pipeline default from v62 → v66 (or make it a flag).
+3. Step 5.1.1 implementation — presigned-PUT upload + post-analysis delete + log redaction. Needed before any external user touches the system.
 
 **Working files:**
-- Modern: `data/input_data/modern_indvidual.txt` (Individual 1, AncestryDNA V2.0)
-- Ancient genotypes: `data/input_data/v62.0_1240k_public.geno` (binary EIGENSTRAT)
-- Ancient individuals: `data/input_data/v62.0_1240k_public.ind` (17,629 individuals)
-- Ancient SNPs: `data/input_data/v62.0_1240k_public.snp` (406,570 SNPs)
-- Ancient annotations: `data/input_data/v62.0_1240k_public.anno`
+- Modern: `data/input_data/AncestryDNA_{rn,jn}.txt` (gitignored)
+- Ancient (local): `data/input_data/v62.0_1240k_public.{geno,ind,snp,anno}`
+- Ancient (R2):   `dataset/v66/v66.1240K.aadr.PUB.{geno,ind,snp,anno}`
+- Entry point:    `python scripts/run_local.py --dna <file> --label <name>`
 
 ---
 
@@ -331,7 +390,7 @@ The output of Step 1.1 is the foundation for all subsequent analysis steps. Noth
 
 | Phase | Description | Estimated Scope |
 |-------|-------------|-----------------|
-| Phase 1 | Core analysis engine — Individual 1 vs ancient dataset | ~3–4 weeks |
+| Phase 1 | Core analysis engine — Individual 1 vs ancient dataset | ~3–4 weeks (5/6 steps done; 1.4 TMRCA + 1.6 finish remaining) |
 | Phase 2 | Web platform architecture design | ~1–2 weeks |
 | Phase 3 | Production pipeline integration | ~2–3 weeks |
 | Phase 4 | Visualisations and user report UI | ~3–4 weeks |
@@ -340,4 +399,4 @@ The output of Step 1.1 is the foundation for all subsequent analysis steps. Noth
 
 ---
 
-*Last updated: April 2026*
+*Last updated: May 2026*

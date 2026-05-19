@@ -15,10 +15,11 @@ Requirements:
   - AADR uploaded to R2 (run scripts/update_aadr.py first if not already done)
 
 Output:
-  output/step1_rn/  — step 1 outputs (overlap, encoded genotypes, summary)
-  output/step2_rn/  — step 2 outputs (haplogroup assignments, matches)
-  output/step3_rn/  — step 3 outputs (distances, PCA, population matches)
-  output/report_<label>.md  — combined human-readable report
+  output/step1_<label>/    — step 1 outputs (overlap, encoded genotypes, summary)
+  output/step2_<label>/    — step 2 outputs (haplogroup assignments, matches)
+  output/step3_<label>/    — step 3 outputs (distances, PCA, population matches)
+  output/step1_5_<label>/  — step 1.5 outputs (admixture decomposition)
+  output/report_<label>.md — combined human-readable report
 """
 from __future__ import annotations
 
@@ -74,14 +75,15 @@ def read_text(path: Path) -> str | None:
 
 def build_report(label: str, run_started: datetime) -> str:
     """Combine step 1/2/3 outputs into a single Markdown report."""
-    step1_summary = read_json(OUTPUT / "step1_rn" / "step1_summary.json")
-    step2_y       = read_json(OUTPUT / "step2_rn" / "ydna_haplogroup.json")
-    step2_mt      = read_json(OUTPUT / "step2_rn" / "mtdna_haplogroup.json")
-    step2_report  = read_text(OUTPUT / "step2_rn" / "haplogroup_report.md")
-    step3_report  = read_text(OUTPUT / "step3_rn" / "top_matches_report.md")
-    pca_variance  = read_json(OUTPUT / "step3_rn" / "pca_variance_explained.json")
-    admixture     = read_json(OUTPUT / "step1_5_rn" / "admixture_decomposition.json")
-    admix_report  = read_text(OUTPUT / "step1_5_rn" / "admixture_report.md")
+    step1_summary = read_json(OUTPUT / f"step1_{label}" / "step1_summary.json")
+    step2_y       = read_json(OUTPUT / f"step2_{label}" / "ydna_haplogroup.json")
+    step2_mt      = read_json(OUTPUT / f"step2_{label}" / "mtdna_haplogroup.json")
+    step2_report  = read_text(OUTPUT / f"step2_{label}" / "haplogroup_report.md")
+    step3_report  = read_text(OUTPUT / f"step3_{label}" / "top_matches_report.md")
+    pca_variance  = read_json(OUTPUT / f"step3_{label}" / "pca_variance_explained.json")
+    admixture     = read_json(OUTPUT / f"step1_5_{label}" / "admixture_decomposition.json")
+    admix_report  = read_text(OUTPUT / f"step1_5_{label}" / "admixture_report.md")
+    tmrca_report  = read_text(OUTPUT / f"step1_4_{label}" / "tmrca_report.md")
 
     lines: list[str] = []
     lines.append(f"# Kinection Analysis Report — {label}")
@@ -195,6 +197,21 @@ def build_report(label: str, run_started: datetime) -> str:
     lines.append("---")
     lines.append("")
 
+    # ── Step 1.4 ──────────────────────────────────────────────────────
+    lines.append("## Step 1.4 — TMRCA Estimation (Y-DNA)")
+    lines.append("")
+    if tmrca_report:
+        body = "\n".join(
+            line for line in tmrca_report.splitlines()
+            if not line.startswith("# ")
+        )
+        lines.append(body.strip())
+    else:
+        lines.append("_Step 1.4 report not available._")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+
     # ── Step 1.5 ──────────────────────────────────────────────────────
     lines.append("## Step 1.5 — Admixture Decomposition")
     lines.append("")
@@ -272,6 +289,7 @@ def main() -> None:
         "LOCAL_OUTPUTS": "1",
         "JOB_ID": job_label,
         "USE_R2": "0" if have_local_aadr else "1",
+        "OUTPUT_LABEL": args.label,
     }
     if args.dna:
         env["MODERN_DNA"] = str(Path(args.dna).expanduser().resolve())
@@ -285,6 +303,7 @@ def main() -> None:
     run_step("step1_parse_harmonise.py", env)
     run_step("step2_haplogroup.py", env)
     run_step("step3_similarity_pca.py", env)
+    run_step("step1_4_tmrca.py", env)
     run_step("step1_5_admixture.py", env)
     elapsed = time.time() - t0
 
