@@ -305,6 +305,7 @@ def main() -> None:
     run_step("step3_similarity_pca.py", env)
     run_step("step1_4_tmrca.py", env)
     run_step("step1_5_admixture.py", env)
+    run_step("step1_6_synthesis.py", env)
     elapsed = time.time() - t0
 
     # Build combined report

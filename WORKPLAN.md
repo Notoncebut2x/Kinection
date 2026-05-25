@@ -52,10 +52,12 @@ A web application where users upload their raw AncestryDNA, 23andMe, or similar 
 |------|-------|--------|
 | 1.1 | Data Parsing & Harmonisation     | ✅ done — `scripts/step1_parse_harmonise.py` |
 | 1.2 | Haplogroup Assignment            | ✅ done — `scripts/step2_haplogroup.py` |
-| 1.3 | Genome-wide Similarity & PCA     | ✅ done — `scripts/step3_similarity_pca.py` |
-| 1.4 | TMRCA Estimation                 | ⬜ pending |
+| 1.3 | Genome-wide Similarity & PCA     | ✅ done — `scripts/step3_similarity_pca.py` (encoding fix: ADR 0014) |
+| 1.4 | TMRCA Estimation                 | ✅ done — `scripts/step1_4_tmrca.py` (ADR 0014; Y-only, mt deferred) |
 | 1.5 | Admixture Decomposition (NNLS)   | ✅ done — `scripts/step1_5_admixture.py` (ADR 0013; replaces the original AMOVA scope) |
-| 1.6 | Interpretation & Report          | 🟡 partial — Markdown via `run_local.py`; structured JSON + geojson for map still TODO |
+| 1.6 | Interpretation & Report          | ✅ done — Markdown via `run_local.py`; structured `report.json` + `map_data.geojson` via `scripts/step1_6_synthesis.py` |
+
+**Phase 1 complete.** Next: Phase 2 (web platform), and the production-readiness items below before any external user touches the system.
 
 ### Step 1.1 — Data Parsing and Harmonisation
 
@@ -180,6 +182,8 @@ A web application where users upload their raw AncestryDNA, 23andMe, or similar 
 ---
 
 ### Step 1.6 — Interpretation and Report Generation
+
+**Status:** ✅ Implemented in `scripts/step1_6_synthesis.py`. Outputs land in `output/step1_6_<label>/`: `report.json` (consolidated structured doc, schema_version 1.0) and `map_data.geojson` (FeatureCollection of top autosomal + Y-TMRCA matches). Markdown synthesis stays in `run_local.py`'s `build_report`.
 
 **Objective:** Synthesise outputs from steps 1.1–1.5 into a structured, human-readable report for Individual 1.
 
@@ -370,13 +374,13 @@ Treat the raw modern-individual file as the most sensitive object in the system.
 
 ## Immediate Next Action
 
-**Recommended next step: Step 1.4 — TMRCA Estimation.**
-It is the highest-value remaining Phase 1 piece — turns "you are R-M269" into "your common ancestor with these ancient individuals lived ~X years ago", which is the narrative payoff of the whole report.
+**Phase 1 is complete.** Pick one of:
 
-**Parallel tracks worth picking up next:**
-1. Step 1.6 finish — produce `report.json` + `map_data.geojson` from the existing run outputs so the future UI has structured input.
-2. Switch local pipeline default from v62 → v66 (or make it a flag).
-3. Step 5.1.1 implementation — presigned-PUT upload + post-analysis delete + log redaction. Needed before any external user touches the system.
+1. **Step 5.1.1 — secure modern-DNA lifecycle.** Required before any external user uploads. Presigned-PUT upload, ephemeral analysis, post-analysis delete with verification, log redaction, pre-commit + CI scanners. Substantial — biggest pre-launch item.
+2. **Phase 2.3 — D1 schema design.** First concrete Phase 2 task; needed before the upload UI can persist jobs. The actual stack is Workers/R2/D1 (ADRs 0011, 0012), so the schema is short: `jobs`, `uploads`, `deletion_receipts`, `results`.
+3. **Step 3 coverage filter tightening.** Low-coverage ancients (~14–26k SNPs) still appear near the top of rn's rankings. Bump `MIN_INDIV_SNPS` from 10k to ~50k or weight by sqrt(snp_count). ~20-line change.
+4. **mtDNA capture-data ingest.** Unlocks mtDNA TMRCA in step 1.4 (currently skipped — 1240k panel has 0 mt SNPs). Separate AADR dataset to download and integrate.
+5. **Switch local pipeline default from v62 → v66.** Now that v66 is in R2 (and a Dataverse downloader exists), making it the default is a small but symbolic graduation.
 
 **Working files:**
 - Modern: `data/input_data/AncestryDNA_{rn,jn}.txt` (gitignored)
@@ -390,7 +394,7 @@ It is the highest-value remaining Phase 1 piece — turns "you are R-M269" into 
 
 | Phase | Description | Estimated Scope |
 |-------|-------------|-----------------|
-| Phase 1 | Core analysis engine — Individual 1 vs ancient dataset | ~3–4 weeks (5/6 steps done; 1.4 TMRCA + 1.6 finish remaining) |
+| Phase 1 | Core analysis engine — Individual 1 vs ancient dataset | ✅ complete (6/6 steps done) |
 | Phase 2 | Web platform architecture design | ~1–2 weeks |
 | Phase 3 | Production pipeline integration | ~2–3 weeks |
 | Phase 4 | Visualisations and user report UI | ~3–4 weeks |
