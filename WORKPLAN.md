@@ -328,7 +328,7 @@ Treat the raw modern-individual file as the most sensitive object in the system.
 - Document and test that R2 does not retain object versions for the `uploads/` prefix (versioning OFF, or lifecycle rule purges noncurrent versions within 24h). A delete that leaves a recoverable version is not a delete.
 
 **Prevent leaks into git, chat, and logs:**
-- `.gitignore` already excludes `data/input_data/` and `output/` — keep it that way, and add a pre-commit hook that greps staged diffs for AncestryDNA-header signatures (`# AncestryDNA raw data`, `rsid\tchromosome\tposition\tallele1\tallele2`) and `rs\d+\t\d+\t\d+\t[ACGT0]\t[ACGT0]` patterns. Block the commit on match.
+- `.gitignore` already excludes `data/input_data/` and `output/` — keep it that way, and add a pre-commit hook that greps staged diffs for AncestryDNA-header signatures (`# AncestryDNA raw data`, `rsid\tchromosome\tposition\tallele1\tallele2`) and `rs\d+\t\d+\t\d+\t[ACGT0]\t[ACGT0]` patterns. Block the commit on match.  <!-- allow-raw-dna -->
 - CI runs the same scanner on every PR.
 - Worker / runner code must never log raw request bodies. Add a lint rule or code-review checklist item.
 - When users (or developers) paste raw DNA into a chat with an AI assistant, the assistant should refuse to echo it back, and the file-handling code must never include raw genotype lines in error messages, exception traces, or telemetry payloads. Sanitise exceptions at the boundary.
@@ -374,13 +374,15 @@ Treat the raw modern-individual file as the most sensitive object in the system.
 
 ## Immediate Next Action
 
-**Phase 1 is complete.** Pick one of:
+**Phase 1 is complete; Phase 2.3 (D1 schema) and most of Step 5.1.1 backend are shipped.**
 
-1. **Step 5.1.1 — secure modern-DNA lifecycle.** Required before any external user uploads. Presigned-PUT upload, ephemeral analysis, post-analysis delete with verification, log redaction, pre-commit + CI scanners. Substantial — biggest pre-launch item.
-2. **Phase 2.3 — D1 schema design.** First concrete Phase 2 task; needed before the upload UI can persist jobs. The actual stack is Workers/R2/D1 (ADRs 0011, 0012), so the schema is short: `jobs`, `uploads`, `deletion_receipts`, `results`.
-3. **Step 3 coverage filter tightening.** Low-coverage ancients (~14–26k SNPs) still appear near the top of rn's rankings. Bump `MIN_INDIV_SNPS` from 10k to ~50k or weight by sqrt(snp_count). ~20-line change.
-4. **mtDNA capture-data ingest.** Unlocks mtDNA TMRCA in step 1.4 (currently skipped — 1240k panel has 0 mt SNPs). Separate AADR dataset to download and integrate.
-5. **Switch local pipeline default from v62 → v66.** Now that v66 is in R2 (and a Dataverse downloader exists), making it the default is a small but symbolic graduation.
+What's left for an MVP:
+
+1. **Apply the new D1 schema in production.** `workers/api/src/schema.sql` is ready (ADR 0015). Run `wrangler d1 execute kinection --remote --file=src/schema.sql`. One-shot operation.
+2. **Configure the new Worker secrets.** `wrangler secret put R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`. These power the presigned-PUT upload flow.
+3. **Frontend (Phase 4).** A small React + TypeScript + Tailwind app that calls `POST /uploads/url`, PUTs the file to R2, polls `GET /jobs/:id` for status, then renders `report.json` + `map_data.geojson`. This is the biggest remaining chunk of work.
+4. **Step 3.1 — Input format support.** Currently only AncestryDNA; extend the parser to 23andMe, FTDNA, MyHeritage. Strand-alignment logic already works for any rsID-based format.
+5. **Cron Trigger for the reaper.** `scripts/reaper.py` exists; needs a Cloudflare Cron Trigger (or a cron job on the daemon host) wired up so it runs daily.
 
 **Working files:**
 - Modern: `data/input_data/AncestryDNA_{rn,jn}.txt` (gitignored)

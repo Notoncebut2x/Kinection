@@ -18,4 +18,11 @@ binding = "MARKER_CACHE"
 id = "ce7a59f47d0d48a189db114e518f9ce8"
 
 [vars]
-# COMPUTE_API_KEY is set via: wrangler secret put COMPUTE_API_KEY
+# Public, non-secret vars only.
+R2_BUCKET_NAME = "kinection"
+
+# Secrets — set each with `wrangler secret put <NAME>`:
+#   COMPUTE_API_KEY        shared with the local analysis daemon (Bearer auth)
+#   R2_ACCOUNT_ID          Cloudflare account ID (for the S3 endpoint hostname)
+#   R2_ACCESS_KEY_ID       R2 API token access key (presigned PUT signing)
+#   R2_SECRET_ACCESS_KEY   R2 API token secret  (presigned PUT signing)

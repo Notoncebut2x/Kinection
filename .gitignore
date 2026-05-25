@@ -37,6 +37,10 @@ __pycache__/
 .wrangler/
 workers/**/.wrangler/
 
+# Node deps
+node_modules/
+workers/**/node_modules/
+
 # Editor
 .vscode/
 .idea/

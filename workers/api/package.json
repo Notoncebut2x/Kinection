@@ -7,6 +7,9 @@
     "deploy": "wrangler deploy",
     "type-check": "tsc --noEmit"
   },
+  "dependencies": {
+    "aws4fetch": "^1.0.20"
+  },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240924.0",
     "typescript": "^5.5.4",
