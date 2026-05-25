@@ -37,4 +37,4 @@ For the security posture, see [`../SECURITY.md`](../SECURITY.md).
 | [0013](0013-admixture-nnls.md) | Admixture decomposition via constrained NNLS | Accepted | Phase 1 |
 | [0014](0014-encoding-and-tmrca-calibration.md) | AADR PACKGENO encoding convention and Y-DNA TMRCA calibration | Accepted | Phase 1 |
 | [0015](0015-d1-schema-v1.md) | D1 schema v1 (jobs, uploads, deletion_receipts, results, audit_log, users, auth_identities) | Accepted | Phase 2 |
-| [0016](0016-mtdna-ingest-plan.md) | mtDNA capture-data ingest — plan, not yet implemented | Proposed | Phase 1 |
+| [0016](0016-mtdna-ingest-plan.md) | mtDNA capture-data ingest (AADR mt repo → mt TMRCA in step 1.4) | Accepted | Phase 1 |

@@ -1,6 +1,6 @@
-# ADR-0016: mtDNA capture-data ingest — plan, not yet implemented
+# ADR-0016: mtDNA capture-data ingest
 
-* Status: Proposed
+* Status: Accepted (implemented 2026-05-25 in commit 6295598)
 * Date: 2026-05-25
 * Supersedes: —
 * Phase: 1 (extends Steps 1.1, 1.2, 1.4)
@@ -88,7 +88,11 @@ Other consumer formats sometimes have denser mt coverage (e.g. FTDNA mt-Full seq
 
 ## Status
 
-**Proposed.** Not implemented in this commit. Pre-requisites discovered and documented, code surface scoped to ~400–600 LOC across 1 new file + 4 modifications. Estimated effort: half a focused session.
+**Accepted, implemented.** Shipped in commit `6295598` (2026-05-25). Actual scope landed at ~700 LOC across `scripts/utils/mt_fasta.py` (new, ~110 LOC), `scripts/data/mt_rcrs.txt` (data), `tests/test_mt_fasta.py` (24 tests), and edits to `step1_parse_harmonise.py`, `step1_4_tmrca.py`, `step1_6_synthesis.py`.
+
+One implementation correction worth noting: the original plan said "no ascertainment correction needed" for mt because we have full ancient mt genomes. That was wrong on the modern side — AncestryDNA's ~190 mt positions ARE ascertained for polymorphism. The implementation uses the full mt-genome length (16,569 bp) as the per-bp formula's denominator, with the assumption that unsampled positions agree between the two samples — a reasonable assumption given mt's high conservation outside the few hundred well-known polymorphic sites. Without this correction, TMRCAs came out ~100× too high (millions of years for k=3 over 170 sampled sites).
+
+Validated on rn: 5 mt-haplogroup matches, TMRCAs in the 5,400-year range with Poisson 95% CIs of 1,100–16,000 — biologically sensible for related R-haplogroup lineages.
 
 ## References
 
