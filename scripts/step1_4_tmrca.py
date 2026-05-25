@@ -71,13 +71,18 @@ OUTPUT_LABEL  = os.environ.get('OUTPUT_LABEL', 'rn')
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-N_TOP_MATCHES   = 10          # how many top Y-haplogroup matches to compute TMRCA for
-MIN_Y_OVERLAP   = 50          # minimum sites called in both to attempt TMRCA
+N_TOP_MATCHES   = 10          # how many top haplogroup matches to compute TMRCA for
+MIN_Y_OVERLAP   = 50          # minimum Y sites called in both to attempt TMRCA
+MIN_MT_OVERLAP  = 30          # minimum mt sites called in both to attempt TMRCA
 # Calibrated per-panel-SNP rate, anchored to known R1b coalescence (~20 ky).
 # The 1240k Y panel is ascertained for polymorphic sites, so this rate is
 # ~10,000x larger than the per-bp Y substitution rate of 0.74e-9. Order-of-
 # magnitude estimate only — absolute TMRCAs accurate within a factor of ~2.
 Y_PANEL_RATE    = 7.0e-6      # per panel-SNP per year
+# mtDNA mutation rate (Soares et al. 2009). Unlike Y, mt has FULL-genome data
+# on the ancient side and only sparsely-sampled positions on the modern side —
+# the per-bp rate works directly here because we're not panel-ascertained.
+MT_MUT_RATE     = 1.665e-8    # per bp per year
 CURRENT_YEAR    = 2026        # for converting BP -> calendar
 # Sites with ancient het (geno==1) on Y are pseudo-het artefacts, treated as missing.
 
@@ -96,8 +101,11 @@ GENO_FILE: Path | None = None
 IND_FILE:  Path | None = None
 ANNO_FILE: Path | None = None
 OVERLAP_TSV = OUT1 / "snp_overlap.tsv"
+MT_POS_TSV  = OUT1 / "modern_mt_positions.tsv"
 YDNA_JSON   = OUT2 / "ydna_haplogroup.json"
+MTDNA_JSON  = OUT2 / "mtdna_haplogroup.json"
 MATCHES_TSV = OUT2 / "ancient_haplogroup_matches.tsv"
+MT_REPO_GZ  = DATA / "v66.MT.repo.fa.gz"  # AADR mt consensus FASTA
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -114,6 +122,10 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 sys.path.insert(0, str(ROOT / "scripts"))
+# Defence-in-depth: scrub raw genotype patterns from log records (Step 5.1.1).
+from utils.log_redact import RedactGenotypesFilter  # noqa: E402
+for _h in logging.getLogger().handlers:
+    _h.addFilter(RedactGenotypesFilter())
 from utils.parsers import parse_ind_file, GenoFile
 if USE_R2:
     from utils import r2_client
@@ -174,10 +186,7 @@ def poisson_ci(k: int, alpha: float = 0.05) -> tuple[float, float]:
 
 
 def tmrca_from_k_l(k: int, l: int) -> tuple[float, float, float]:
-    """
-    Returns (point, lo_95, hi_95) TMRCA in years given k diffs over L panel SNPs.
-    Returns (nan, nan, nan) if L < MIN_Y_OVERLAP.
-    """
+    """Y-DNA TMRCA: panel-SNP count, calibrated rate."""
     if l < MIN_Y_OVERLAP:
         return float("nan"), float("nan"), float("nan")
     denom = 2.0 * Y_PANEL_RATE * l
@@ -185,76 +194,318 @@ def tmrca_from_k_l(k: int, l: int) -> tuple[float, float, float]:
     return k / denom, k_lo / denom, k_hi / denom
 
 
-def write_stub(reason: str) -> None:
-    """When Y haplogroup confidence is too low to attempt TMRCA."""
+def mt_tmrca_from_k_l(k: int, l: int) -> tuple[float, float, float]:
+    """
+    mtDNA TMRCA in years, using per-bp formula with mt mutation rate
+    (Soares 2009).
+
+    The denominator is the FULL mt-genome length (16,569 bp), not the number
+    of sampled positions `l`. AncestryDNA arrays sample ~190 ascertained
+    mt positions, which are enriched for polymorphism — using `l` as the
+    denominator would inflate TMRCA by ~100x. The implicit assumption is
+    that the unsampled positions agree between modern and ancient, which
+    is reasonable for the highly-conserved mt genome.
+
+    `l` is still required to be >= MIN_MT_OVERLAP so we have enough sampled
+    data to trust the count `k` at all.
+    """
+    if l < MIN_MT_OVERLAP:
+        return float("nan"), float("nan"), float("nan")
+    denom = 2.0 * MT_MUT_RATE * 16_569
+    k_lo, k_hi = poisson_ci(k)
+    return k / denom, k_lo / denom, k_hi / denom
+
+
+def compute_mt_tmrca(all_matches: list[dict]) -> dict:
+    """
+    mtDNA TMRCA path. Independent of the Y path — works even when Y was
+    skipped, and vice versa. Returns a dict suitable for embedding in
+    tmrca_timeline.json.
+
+    Inputs read from disk:
+      - output/step1_<label>/modern_mt_positions.tsv  (modern's ~190 mt sites)
+      - data/input_data/v66.MT.repo.fa.gz             (AADR mt repo)
+
+    Sources of "ancient comparators":
+      - Step 2's ancient_haplogroup_matches.tsv rows where match_type
+        contains 'MT'. Sorted by mt_proximity_score desc, take top
+        N_TOP_MATCHES.
+    """
+    modern_mt = load_modern_mt(MT_POS_TSV)
+    if not modern_mt:
+        log.info("mtDNA TMRCA skipped: no modern mt positions in %s", MT_POS_TSV)
+        return {"skipped": True, "reason": "no modern mt positions",
+                "n_modern_mt_positions": 0, "matches": []}
+
+    if not MT_REPO_GZ.exists():
+        log.warning("mtDNA TMRCA skipped: %s not found. Download via "
+                    "scripts/download_v62_local.py or fetch from Dataverse.",
+                    MT_REPO_GZ)
+        return {"skipped": True, "reason": f"mt repo file missing: {MT_REPO_GZ}",
+                "n_modern_mt_positions": len(modern_mt), "matches": []}
+
+    # Pick top mt-haplogroup matches
+    mt_top: list[dict] = [
+        m for m in all_matches if "MT" in m.get("match_type", "")
+    ]
+    mt_top.sort(key=lambda r: (-int(r.get("mt_proximity_score", 0)),
+                                -r["_combined"]))
+    mt_top = mt_top[:N_TOP_MATCHES]
+    if not mt_top:
+        log.info("mtDNA TMRCA: no MT-type matches in step 2 — comparing against "
+                 "the top combined-score ancients regardless of haplogroup.")
+        # Fallback: rank by combined_score so we still produce useful output.
+        mt_top = sorted(all_matches, key=lambda r: -r["_combined"])[:N_TOP_MATCHES]
+    log.info("mtDNA TMRCA: %d candidate matches, %d modern mt positions",
+             len(mt_top), len(modern_mt))
+
+    # Load mt repo (lazy import — only when we have something to do)
+    from utils.mt_fasta import load_mt_repo, is_called
+    mt_repo = load_mt_repo(MT_REPO_GZ)
+
+    results: list[dict] = []
+    for m in mt_top:
+        gid = m["genetic_id"]
+        seq = mt_repo.get(gid)
+        if seq is None:
+            log.warning("  mt: %s not in mt repo, skipping", gid)
+            continue
+        # Count differences at modern's sampled positions
+        k = l = 0
+        for pos1, modern_base in modern_mt:
+            idx = pos1 - 1  # convert 1-indexed rCRS to 0-indexed string
+            if idx < 0 or idx >= len(seq):
+                continue
+            anc = seq[idx]
+            if not is_called(anc):
+                continue
+            l += 1
+            if anc != modern_base:
+                k += 1
+        diff_rate = (k / l) if l > 0 else float("nan")
+        T, T_lo, T_hi = mt_tmrca_from_k_l(k, l)
+
+        date_bp = m.get("_date_bp")
+        floor_violation = (
+            date_bp is not None and not np.isnan(T) and T < date_bp
+        )
+
+        rec = {
+            "genetic_id":           gid,
+            "population":           m.get("group_id", ""),
+            "ancient_mt_haplogroup": m.get("ancient_mt_haplogroup", ""),
+            "locality":             m.get("locality", ""),
+            "lat":                  float(m["lat"]) if m.get("lat") else None,
+            "lon":                  float(m["lon"]) if m.get("lon") else None,
+            "date_bp":              date_bp,
+            "date_display":         m.get("date_display", ""),
+            "n_mt_sites":           l,
+            "n_diff":               k,
+            "diff_rate":            diff_rate if not np.isnan(diff_rate) else None,
+            "tmrca_yr":             T if not np.isnan(T) else None,
+            "tmrca_lo_95":          T_lo if not np.isnan(T_lo) else None,
+            "tmrca_hi_95":          T_hi if not np.isnan(T_hi) else None,
+            "below_sample_age":     floor_violation,
+        }
+        results.append(rec)
+        if np.isnan(T):
+            log.info("  mt: %-22s  L=%4d  k=%3d  rate=NA   TMRCA=NA  (need ≥%d sites)",
+                     gid, l, k, MIN_MT_OVERLAP)
+        else:
+            log.info("  mt: %-22s  L=%4d  k=%3d  rate=%.4f  TMRCA≈%6.0f y  CI=[%.0f, %.0f]%s",
+                     gid, l, k, diff_rate, T, T_lo, T_hi,
+                     "  ⚠ below sample age" if floor_violation else "")
+
+    return {
+        "skipped": False,
+        "reason":  None,
+        "n_modern_mt_positions": len(modern_mt),
+        "matches": results,
+    }
+
+
+def load_modern_mt(path: Path) -> list[tuple[int, str]]:
+    """
+    Read modern mt positions written by step 1.1.
+
+    Returns a list of (position_1indexed, allele) tuples. Skips heterozygous
+    sites (allele1 != allele2 on a haploid genome = noise/heteroplasmy) and
+    non-ACGT entries. Positions match rCRS 1-indexed coordinates.
+    """
+    out: list[tuple[int, str]] = []
+    if not path.exists():
+        return out
+    with open(path) as fh:
+        fh.readline()  # header
+        for line in fh:
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) < 4:
+                continue
+            try:
+                pos = int(parts[1])
+            except ValueError:
+                continue
+            a1, a2 = parts[2].upper(), parts[3].upper()
+            if a1 != a2 or a1 not in "ACGT":
+                continue
+            out.append((pos, a1))
+    return out
+
+
+def write_y_stub(reason: str, all_matches: list[dict] | None = None) -> None:
+    """
+    Y-DNA TMRCA skipped (low haplogroup confidence, missing inputs, etc.).
+    Still runs the mt-DNA TMRCA path — they're independent (ADR 0016).
+    """
     log.warning("Skipping Y-DNA TMRCA: %s", reason)
     (OUTPUT / "ydna_tmrca.tsv").write_text(
         "genetic_id\tpopulation\tdate_bp\tn_y_sites\tn_diff\t"
         "tmrca_yr\ttmrca_lo_95\ttmrca_hi_95\tnote\n"
         f"#\t#\t#\t0\t0\tNA\tNA\tNA\t{reason}\n"
     )
-    (OUTPUT / "tmrca_timeline.json").write_text(json.dumps({
-        "label": OUTPUT_LABEL, "skipped": True, "reason": reason, "matches": []
-    }, indent=2))
-    write_mt_stub()
-    (OUTPUT / "tmrca_report.md").write_text(
-        f"# TMRCA Estimation — {OUTPUT_LABEL}\n\n"
-        f"_Step 1.4 was skipped: **{reason}**_\n\n"
-        f"Y-DNA TMRCA requires a confident haplogroup assignment from step 2 "
-        f"to identify meaningful ancient comparators. mtDNA TMRCA is not yet "
-        f"available because the 1240k panel contains no mtDNA SNPs.\n"
-    )
+
+    # mtDNA can still be computed even when Y is skipped.
+    mt_results = compute_mt_tmrca(all_matches or [])
+
+    timeline = {
+        "label":          OUTPUT_LABEL,
+        "skipped":        True,
+        "reason":         reason,
+        "matches":        [],
+        "mt_method":      f"pairwise mt-base differences, mu_mt={MT_MUT_RATE:.2e}/bp/year",
+        "mt_skipped":     mt_results.get("skipped", True),
+        "mt_skip_reason": mt_results.get("reason"),
+        "mt_matches":     mt_results.get("matches", []),
+        "modern_mt_positions": mt_results.get("n_modern_mt_positions"),
+    }
+    (OUTPUT / "tmrca_timeline.json").write_text(json.dumps(timeline, indent=2, default=str))
+
+    # mt TSV
+    if mt_results.get("skipped"):
+        (OUTPUT / "mtdna_tmrca.tsv").write_text(
+            f"# mtDNA TMRCA skipped: {mt_results.get('reason', 'unknown')}\n"
+        )
+    else:
+        with open(OUTPUT / "mtdna_tmrca.tsv", "w") as fh:
+            fh.write("genetic_id\tpopulation\tancient_mt_haplogroup\tdate_bp\t"
+                     "n_mt_sites\tn_diff\tdiff_rate\ttmrca_yr\ttmrca_lo_95\ttmrca_hi_95\tnote\n")
+            for r in mt_results["matches"]:
+                note = "below_sample_age" if r["below_sample_age"] else ""
+                date_str = str(r['date_bp']) if r['date_bp'] is not None else "NA"
+                common = (
+                    f"{r['genetic_id']}\t{r['population']}\t{r['ancient_mt_haplogroup']}\t"
+                    f"{date_str}\t{r['n_mt_sites']}\t{r['n_diff']}\t"
+                )
+                if r["tmrca_yr"] is not None:
+                    fh.write(common + f"{r['diff_rate']:.4f}\t{r['tmrca_yr']:.0f}\t"
+                             f"{r['tmrca_lo_95']:.0f}\t{r['tmrca_hi_95']:.0f}\t{note}\n")
+                else:
+                    fh.write(common + "NA\tNA\tNA\tNA\tinsufficient_sites\n")
+
+    # Markdown report
+    md_lines = [
+        f"# TMRCA Estimation — {OUTPUT_LABEL}",
+        "",
+        f"## Y-DNA — skipped",
+        "",
+        f"_Reason: **{reason}**_",
+        "",
+        f"Y-DNA TMRCA requires a confident haplogroup assignment from step 2 to "
+        f"identify meaningful ancient comparators.",
+        "",
+    ]
+    if mt_results.get("skipped"):
+        md_lines += [
+            f"## mtDNA — skipped",
+            "",
+            f"_Reason: {mt_results.get('reason', 'unknown')}_",
+        ]
+    else:
+        md_lines += [
+            f"## Top mtDNA-haplogroup matches",
+            "",
+            f"_Modern mtDNA sampled positions: {mt_results['n_modern_mt_positions']}._",
+            f"_Mutation rate: μ_mt = {MT_MUT_RATE:.2e}/bp/year (Soares 2009)._",
+            "",
+            "| Ancient | Population | mt-hg | Date | mt sites | Diffs | k/L | TMRCA ≈ (yr) | 95% CI |",
+            "|---|---|---|---|---:|---:|---:|---:|---|",
+        ]
+        for r in mt_results["matches"]:
+            date_str = r["date_display"] or (f"{int(r['date_bp'])} BP" if r["date_bp"] else "—")
+            if r["tmrca_yr"] is None:
+                rate_str = tmrca_str = ci_str = "—"
+            else:
+                rate_str = f"{r['diff_rate']:.4f}"
+                tmrca_str = f"{r['tmrca_yr']:,.0f}"
+                ci_str = f"{r['tmrca_lo_95']:,.0f}–{r['tmrca_hi_95']:,.0f}"
+                if r["below_sample_age"]:
+                    tmrca_str += " ⚠"
+            md_lines.append(
+                f"| {r['genetic_id']} | {r['population']} | "
+                f"{r['ancient_mt_haplogroup']} | {date_str} | {r['n_mt_sites']} | "
+                f"{r['n_diff']} | {rate_str} | {tmrca_str} | {ci_str} |"
+            )
+    (OUTPUT / "tmrca_report.md").write_text("\n".join(md_lines) + "\n")
 
 
-def write_mt_stub() -> None:
-    (OUTPUT / "mtdna_tmrca.tsv").write_text(
-        "# mtDNA TMRCA not computed: the 1240k panel contains 0 mtDNA SNPs.\n"
-        "# Future work: ingest AADR's separate mt-capture dataset.\n"
-    )
+# Backwards-compat alias (old name)
+write_stub = write_y_stub
 
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
+def load_all_matches() -> list[dict]:
+    """Load every row of ancient_haplogroup_matches.tsv (Y and MT alike)."""
+    if not MATCHES_TSV.exists():
+        return []
+    out: list[dict] = []
+    with open(MATCHES_TSV) as fh:
+        header = fh.readline().rstrip("\n").split("\t")
+        for line in fh:
+            row = dict(zip(header, line.rstrip("\n").split("\t")))
+            try:
+                row["_y_score"]  = int(row.get("y_proximity_score", "0") or "0")
+                row["_mt_score"] = int(row.get("mt_proximity_score", "0") or "0")
+                row["_combined"] = int(row.get("combined_score", "0") or "0")
+                row["_date_bp"]  = float(row["date_bp"]) if row.get("date_bp") else None
+            except ValueError:
+                continue
+            out.append(row)
+    return out
+
+
 def main() -> None:
-    log.info("=== Step 1.4 — Y-DNA TMRCA Estimation ===")
+    log.info("=== Step 1.4 — Y-DNA + mtDNA TMRCA Estimation ===")
     log.info("Label: %s", OUTPUT_LABEL)
 
-    # ── 1. Confidence gate ──────────────────────────────────────────────
+    # Load matches once, before any skip paths — both Y and mt branches need it.
+    all_matches = load_all_matches()
+    log.info("Loaded %d total haplogroup-match rows from step 2", len(all_matches))
+
+    # ── 1. Y confidence gate ────────────────────────────────────────────
     if not YDNA_JSON.exists():
-        write_stub("step 2 Y-DNA output not found")
+        write_y_stub("step 2 Y-DNA output not found", all_matches)
         return
     ydna = json.loads(YDNA_JSON.read_text())
     hg, conf = ydna.get("haplogroup", ""), ydna.get("confidence", "low")
     log.info("Step 2 Y-haplogroup: %s (confidence: %s)", hg, conf)
     if conf == "low" or hg in ("", "Unknown"):
-        write_stub(f"Y-haplogroup confidence too low (haplogroup={hg!r}, confidence={conf!r})")
+        write_y_stub(f"Y-haplogroup confidence too low (haplogroup={hg!r}, confidence={conf!r})",
+                     all_matches)
         return
 
-    # ── 2. Load top Y-matches from step 2 ───────────────────────────────
-    if not MATCHES_TSV.exists():
-        write_stub("step 2 haplogroup_matches.tsv not found")
+    # ── 2. Filter to top Y-matches ──────────────────────────────────────
+    if not all_matches:
+        write_y_stub("step 2 haplogroup_matches.tsv missing or empty", all_matches)
         return
-    matches: list[dict] = []
-    with open(MATCHES_TSV) as fh:
-        header = fh.readline().rstrip("\n").split("\t")
-        for line in fh:
-            row = dict(zip(header, line.rstrip("\n").split("\t")))
-            if "Y" not in row.get("match_type", ""):
-                continue
-            try:
-                row["_y_score"] = int(row["y_proximity_score"])
-                row["_combined"] = int(row["combined_score"])
-                row["_date_bp"]  = float(row["date_bp"]) if row["date_bp"] else None
-            except (KeyError, ValueError):
-                continue
-            matches.append(row)
+    matches = [m for m in all_matches if "Y" in m.get("match_type", "")]
     matches.sort(key=lambda r: (-r["_y_score"], -r["_combined"]))
     top = matches[:N_TOP_MATCHES]
-    log.info("Loaded %d Y-matches from step 2, taking top %d", len(matches), len(top))
+    log.info("Y-matches: %d total, taking top %d", len(matches), len(top))
     if not top:
-        write_stub("no Y-haplogroup matches in step 2 output")
+        write_y_stub("no Y-haplogroup matches in step 2 output", all_matches)
         return
 
     # ── 3. Load modern Y SNPs ───────────────────────────────────────────
@@ -262,7 +513,8 @@ def main() -> None:
     log.info("Modern Y SNPs in overlap: %d (called: %d)",
              len(y_indices), int((modern_y >= 0).sum()))
     if len(y_indices) < MIN_Y_OVERLAP:
-        write_stub(f"only {len(y_indices)} Y SNPs in overlap (need ≥{MIN_Y_OVERLAP})")
+        write_y_stub(f"only {len(y_indices)} Y SNPs in overlap (need ≥{MIN_Y_OVERLAP})",
+                     all_matches)
         return
 
     # ── 4. Open .ind + .geno ────────────────────────────────────────────
@@ -377,31 +629,105 @@ def main() -> None:
                 fh.write(common + "NA\tNA\tNA\tNA\tinsufficient_sites\n")
     log.info("Wrote %s", tsv)
 
-    # JSON for timeline viz
+    # ── 8. mtDNA TMRCA (independent of Y; ADR 0016) ─────────────────────
+    mt_results = compute_mt_tmrca(all_matches)
+
+    # JSON for timeline viz — includes both Y and mt
     timeline = {
         "label":      OUTPUT_LABEL,
         "skipped":    False,
-        "method":     f"pairwise Y-SNP differences on 1240k panel, "
+        "y_method":   f"pairwise Y-SNP differences on 1240k panel, "
                       f"calibrated mu_panel={Y_PANEL_RATE:.1e}/panel-SNP/year, Poisson 95% CI",
-        "modern_y_haplogroup":      hg,
-        "modern_y_confidence":      conf,
-        "n_modern_y_sites_called":  int((modern_y >= 0).sum()),
-        "matches": results,
+        "mt_method":  f"pairwise mt-base differences at modern sampling positions, "
+                      f"mu_mt={MT_MUT_RATE:.2e}/bp/year (Soares 2009), Poisson 95% CI",
+        "modern_y_haplogroup":       hg,
+        "modern_y_confidence":       conf,
+        "n_modern_y_sites_called":   int((modern_y >= 0).sum()),
+        "modern_mt_positions":       mt_results.get("n_modern_mt_positions"),
+        "matches":    results,
+        "mt_matches": mt_results.get("matches", []),
+        "mt_skipped": mt_results.get("skipped", True),
+        "mt_skip_reason": mt_results.get("reason"),
     }
     (OUTPUT / "tmrca_timeline.json").write_text(json.dumps(timeline, indent=2, default=str))
     log.info("Wrote %s", OUTPUT / "tmrca_timeline.json")
 
-    write_mt_stub()
+    # mtDNA TSV — real now (was a stub before ADR 0016)
+    if mt_results.get("skipped"):
+        (OUTPUT / "mtdna_tmrca.tsv").write_text(
+            f"# mtDNA TMRCA skipped: {mt_results.get('reason', 'unknown')}\n"
+        )
+    else:
+        mt_tsv = OUTPUT / "mtdna_tmrca.tsv"
+        with open(mt_tsv, "w") as fh:
+            fh.write("genetic_id\tpopulation\tancient_mt_haplogroup\tdate_bp\t"
+                     "n_mt_sites\tn_diff\tdiff_rate\ttmrca_yr\ttmrca_lo_95\ttmrca_hi_95\tnote\n")
+            for r in mt_results["matches"]:
+                note = "below_sample_age" if r["below_sample_age"] else ""
+                date_str = str(r['date_bp']) if r['date_bp'] is not None else "NA"
+                common = (
+                    f"{r['genetic_id']}\t{r['population']}\t{r['ancient_mt_haplogroup']}\t"
+                    f"{date_str}\t{r['n_mt_sites']}\t{r['n_diff']}\t"
+                )
+                if r["tmrca_yr"] is not None:
+                    fh.write(
+                        common +
+                        f"{r['diff_rate']:.4f}\t{r['tmrca_yr']:.0f}\t"
+                        f"{r['tmrca_lo_95']:.0f}\t{r['tmrca_hi_95']:.0f}\t{note}\n"
+                    )
+                else:
+                    fh.write(common + "NA\tNA\tNA\tNA\tinsufficient_sites\n")
+        log.info("Wrote %s", mt_tsv)
 
     # Markdown report
+    mt_section_lines: list[str] = []
+    if mt_results.get("skipped"):
+        mt_section_lines = [
+            "## mtDNA TMRCA — skipped",
+            "",
+            f"_Reason: {mt_results.get('reason', 'unknown')}_",
+            "",
+        ]
+    else:
+        mt_section_lines = [
+            f"## Top mtDNA-haplogroup matches",
+            "",
+            f"_Modern mtDNA sampled positions: {mt_results['n_modern_mt_positions']} (rCRS-indexed)._  ",
+            f"_Mutation rate: μ_mt = {MT_MUT_RATE:.2e}/bp/year (Soares 2009)._",
+            "",
+            "| Ancient | Population | mt-hg | Date | mt sites | Diffs | k/L | TMRCA ≈ (yr) | 95% CI |",
+            "|---|---|---|---|---:|---:|---:|---:|---|",
+        ]
+        for r in mt_results["matches"]:
+            date_str = r["date_display"] or (f"{int(r['date_bp'])} BP" if r["date_bp"] else "—")
+            if r["tmrca_yr"] is None:
+                rate_str = tmrca_str = ci_str = "—"
+            else:
+                rate_str = f"{r['diff_rate']:.4f}"
+                tmrca_str = f"{r['tmrca_yr']:,.0f}"
+                ci_str = f"{r['tmrca_lo_95']:,.0f}–{r['tmrca_hi_95']:,.0f}"
+                if r["below_sample_age"]:
+                    tmrca_str += " ⚠"
+            mt_section_lines.append(
+                f"| {r['genetic_id']} | {r['population']} | "
+                f"{r['ancient_mt_haplogroup']} | {date_str} | {r['n_mt_sites']} | "
+                f"{r['n_diff']} | {rate_str} | {tmrca_str} | {ci_str} |"
+            )
+        mt_section_lines.append("")
+
     report_lines = [
         f"# TMRCA Estimation — {OUTPUT_LABEL}",
         "",
         f"**Modern Y-haplogroup:** {hg} (confidence: {conf})",
-        f"**Method:** Pairwise Y-SNP difference rate (`k/L`) on the 1240k panel "
+        f"**Y method:** Pairwise Y-SNP difference rate (`k/L`) on the 1240k panel "
         f"vs each ancient match. Approximate TMRCA in years uses a calibrated "
         f"per-panel-SNP rate of {Y_PANEL_RATE:.0e}/year, anchored to known "
         f"R1b coalescence (~20 ky).",
+        f"**mt method:** Pairwise mt-base comparison at modern sampling positions "
+        f"vs full ancient mt consensus from AADR's mt repository. Uses the "
+        f"per-bp rate directly (μ_mt = {MT_MUT_RATE:.2e}/bp/year, Soares 2009) — "
+        f"mt isn't ascertained the way the Y panel is, so this estimate is "
+        f"intrinsically cleaner than the Y one.",
         f"**Modern Y SNPs called:** {int((modern_y >= 0).sum())} of "
         f"{len(modern_y)} Y positions in overlap.",
         "",
@@ -452,9 +778,11 @@ def main() -> None:
         "- Matches flagged ⚠ have a point estimate younger than the ancient sample's",
         "  archaeological date, which is impossible. Almost always this means k≈0",
         "  and the upper CI is the meaningful number.",
-        "- mtDNA TMRCA is not yet available: the 1240k SNP panel contains zero mtDNA",
-        "  sites. Will require ingesting AADR's separate mt-capture dataset.",
-    ]
+        "- mtDNA TMRCA (below) is intrinsically cleaner than Y because the ancient",
+        "  side is full mt-genome rather than ascertained panel SNPs — but the",
+        "  modern side is only ~190 array positions, so CIs are still wide.",
+        "",
+    ] + mt_section_lines
     (OUTPUT / "tmrca_report.md").write_text("\n".join(report_lines) + "\n")
     log.info("Wrote %s", OUTPUT / "tmrca_report.md")
 

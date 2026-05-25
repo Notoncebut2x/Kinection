@@ -145,6 +145,10 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 sys.path.insert(0, str(ROOT / "scripts"))
+# Defence-in-depth: scrub raw genotype patterns from log records (Step 5.1.1).
+from utils.log_redact import RedactGenotypesFilter  # noqa: E402
+for _h in logging.getLogger().handlers:
+    _h.addFilter(RedactGenotypesFilter())
 from utils.parsers import parse_ind_file, parse_anno_file, GenoFile
 if USE_R2:
     from utils import r2_client

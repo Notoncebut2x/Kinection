@@ -77,6 +77,12 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
+# Defence-in-depth: scrub raw genotype patterns from log records (Step 5.1.1).
+sys.path.insert(0, str(ROOT / "scripts"))
+from utils.log_redact import RedactGenotypesFilter  # noqa: E402
+for _h in logging.getLogger().handlers:
+    _h.addFilter(RedactGenotypesFilter())
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -329,17 +335,45 @@ def build_geojson(report: dict[str, Any]) -> dict[str, Any]:
                 },
             })
 
+    # mt-TMRCA matches (from step 1.4, ADR 0016)
+    y_tmrca = report["y_tmrca"]
+    if not y_tmrca.get("mt_skipped", True):
+        for m in y_tmrca.get("mt_matches", []):
+            if m.get("lat") is None or m.get("lon") is None:
+                continue
+            features.append({
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [m["lon"], m["lat"]]},
+                "properties": {
+                    "match_type":      "mt_tmrca",
+                    "genetic_id":      m["genetic_id"],
+                    "population":      m["population"],
+                    "locality":        m.get("locality"),
+                    "date_bp":         m.get("date_bp"),
+                    "date_display":    m.get("date_display"),
+                    "ancient_mt_haplogroup": m.get("ancient_mt_haplogroup"),
+                    "n_mt_sites":      m.get("n_mt_sites"),
+                    "n_diff":          m.get("n_diff"),
+                    "diff_rate":       m.get("diff_rate"),
+                    "tmrca_yr":        m.get("tmrca_yr"),
+                    "tmrca_lo_95":     m.get("tmrca_lo_95"),
+                    "tmrca_hi_95":     m.get("tmrca_hi_95"),
+                },
+            })
+
     return {
         "type": "FeatureCollection",
         "metadata": {
             "label":        report["label"],
             "generated_at": report["generated_at"],
             "n_features":   len(features),
-            "match_types": ["autosomal", "y_tmrca"],
+            "match_types": ["autosomal", "y_tmrca", "mt_tmrca"],
             "notes": (
                 "Each Point is one ancient sample. 'match_type=autosomal' = top "
                 "genome-wide ASD matches from step 1.3. 'match_type=y_tmrca' = top "
-                "Y-haplogroup matches from step 2 with TMRCA estimates from step 1.4."
+                "Y-haplogroup matches with TMRCA estimates from step 1.4. "
+                "'match_type=mt_tmrca' = top mtDNA-haplogroup matches with mt-TMRCA "
+                "from step 1.4 (ADR 0016)."
             ),
         },
         "features": features,

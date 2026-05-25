@@ -82,6 +82,10 @@ log = logging.getLogger(__name__)
 
 # Add scripts dir to path so utils can be imported
 sys.path.insert(0, str(ROOT / "scripts"))
+# Defence-in-depth: scrub raw genotype patterns from log records (Step 5.1.1).
+from utils.log_redact import RedactGenotypesFilter  # noqa: E402
+for _h in logging.getLogger().handlers:
+    _h.addFilter(RedactGenotypesFilter())
 from utils.parsers import (
     parse_ancestry_dna,
     parse_ind_file,
@@ -411,6 +415,22 @@ def main() -> None:
 
         modern_encoded = dosage_values
         snp_overlap_rows = overlap_records
+
+    # ------------------------------------------------------------------
+    # 5b. Extract modern mtDNA positions (chromosome 26 / MT)
+    # ------------------------------------------------------------------
+    # mtDNA isn't in the 1240k SNP panel, so it gets dropped from the main
+    # snp_overlap.tsv. Write it to its own file for step 1.4's mt TMRCA path.
+    mt_rows = [
+        s for s in modern_snps.values()
+        if s.chrom in ("MT", "26", "chrMT", "chrM")
+    ]
+    mt_path = OUTPUT / "modern_mt_positions.tsv"
+    with open(mt_path, "w") as fh:
+        fh.write("rsid\tposition\tallele1\tallele2\n")
+        for s in sorted(mt_rows, key=lambda x: x.position):
+            fh.write(f"{s.rsid}\t{s.position}\t{s.allele1}\t{s.allele2}\n")
+    log.info("Wrote %d modern mtDNA positions: %s", len(mt_rows), mt_path)
 
     # ------------------------------------------------------------------
     # 6. Parse .anno for individual metadata summary
