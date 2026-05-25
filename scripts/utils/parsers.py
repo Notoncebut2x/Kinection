@@ -44,6 +44,52 @@ def complement(allele: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Local AADR file resolver (version-agnostic)
+# ---------------------------------------------------------------------------
+
+def resolve_local_aadr(data_dir: Path) -> dict[str, Path]:
+    """
+    Glob `data_dir` for AADR files in either of the known naming conventions:
+      - v62 / earlier: `v62.0_1240k_public.{geno,ind,snp,anno}`
+      - v66 / later:   `v66.1240K.aadr.PUB.{geno,ind,snp,anno}`
+
+    Returns a dict {ext: Path} for the four required files. If multiple
+    versions are present, the newest by lexicographic-but-numeric ordering
+    of the leading `v<NN>` token wins (so v66 beats v62).
+
+    Raises FileNotFoundError if any of the four extensions is missing.
+    """
+    def version_key(p: Path) -> tuple[int, str]:
+        # Extract the leading vNN to sort versions numerically.
+        token = p.name.split("_")[0].split(".")[0]  # "v66" or "v62"
+        try:
+            return (int(token.lstrip("v")), p.name)
+        except ValueError:
+            return (-1, p.name)
+
+    patterns = (
+        "v*_1240k_public.{ext}",
+        "v*.1240K.aadr.PUB.{ext}",
+    )
+    out: dict[str, Path] = {}
+    missing: list[str] = []
+    for ext in ("geno", "ind", "snp", "anno"):
+        candidates: list[Path] = []
+        for pat in patterns:
+            candidates.extend(data_dir.glob(pat.format(ext=ext)))
+        if not candidates:
+            missing.append(ext)
+            continue
+        out[ext] = max(candidates, key=version_key)
+    if missing:
+        raise FileNotFoundError(
+            f"AADR files missing in {data_dir}: {missing}. "
+            f"Run scripts/download_v62_local.py or `update_aadr.py` to populate."
+        )
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Data containers
 # ---------------------------------------------------------------------------
 

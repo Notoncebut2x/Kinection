@@ -59,10 +59,10 @@ OUT1 = ROOT / "output" / f"step1_{OUTPUT_LABEL}"
 OUTPUT = ROOT / "output" / f"step1_5_{OUTPUT_LABEL}"
 OUTPUT.mkdir(parents=True, exist_ok=True)
 
-# Local-mode input paths (mirror step 3 conventions)
-GENO_FILE = DATA / "v62.0_1240k_public.geno"
-IND_FILE  = DATA / "v62.0_1240k_public.ind"
-ANNO_FILE = DATA / "v62.0_1240k_public.anno"
+# Local AADR resolved lazily in main() — works for any version (v62, v66, ...).
+GENO_FILE: Path | None = None
+IND_FILE:  Path | None = None
+ANNO_FILE: Path | None = None
 
 # Bootstrap config
 N_BOOTSTRAP = int(os.environ.get('ADMIX_BOOTSTRAP', '200'))
@@ -418,6 +418,11 @@ def main() -> None:
             _tmp_files.append(_overlap_path)
         geno = R2GenoFile.open(r2_client.GENO_KEY)
     else:
+        from utils.parsers import resolve_local_aadr
+        _aadr = resolve_local_aadr(DATA)
+        global GENO_FILE, IND_FILE, ANNO_FILE
+        GENO_FILE, IND_FILE, ANNO_FILE = _aadr["geno"], _aadr["ind"], _aadr["anno"]
+        log.info("Local AADR resolved: %s", GENO_FILE.name)
         _ind_path = IND_FILE
         _anno_path = ANNO_FILE
         _overlap_path = OUT1 / "snp_overlap.tsv"

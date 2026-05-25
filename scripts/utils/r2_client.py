@@ -44,15 +44,17 @@ MTDNA_MARKERS_KEY = 'markers/mtdna_markers.json'
 # Modern individual DNA files are NEVER stored in R2 — local filesystem only.
 
 
-# Fallback paths used if the manifest is missing (fresh R2, pre-update_aadr)
-_DEFAULT_VERSION = 'v62.0'
+# Fallback paths used if the manifest is missing (fresh R2, pre-update_aadr).
+# Set to v66 to match the current canonical cloud version; the actual key
+# resolution always prefers the manifest at dataset/current_version.json.
+_DEFAULT_VERSION = 'v66'
 _DEFAULT_KEYS = {
     'version': _DEFAULT_VERSION,
     'prefix':  f'dataset/{_DEFAULT_VERSION}',
-    'geno':    f'dataset/{_DEFAULT_VERSION}/{_DEFAULT_VERSION}_1240k_public.geno',
-    'ind':     f'dataset/{_DEFAULT_VERSION}/{_DEFAULT_VERSION}_1240k_public.ind',
-    'snp':     f'dataset/{_DEFAULT_VERSION}/{_DEFAULT_VERSION}_1240k_public.snp',
-    'anno':    f'dataset/{_DEFAULT_VERSION}/{_DEFAULT_VERSION}_1240k_public.anno',
+    'geno':    f'dataset/{_DEFAULT_VERSION}/{_DEFAULT_VERSION}.1240K.aadr.PUB.geno',
+    'ind':     f'dataset/{_DEFAULT_VERSION}/{_DEFAULT_VERSION}.1240K.aadr.PUB.ind',
+    'snp':     f'dataset/{_DEFAULT_VERSION}/{_DEFAULT_VERSION}.1240K.aadr.PUB.snp',
+    'anno':    f'dataset/{_DEFAULT_VERSION}/{_DEFAULT_VERSION}.1240K.aadr.PUB.anno',
 }
 
 

@@ -58,10 +58,13 @@ OUTPUT = ROOT / "output" / f"step1_{OUTPUT_LABEL}"
 OUTPUT.mkdir(parents=True, exist_ok=True)
 
 MODERN_INDV1 = DATA / "AncestryDNA_rn.txt"
-GENO_FILE    = DATA / "v62.0_1240k_public.geno"
-IND_FILE     = DATA / "v62.0_1240k_public.ind"
-SNP_FILE     = DATA / "v62.0_1240k_public.snp"
-ANNO_FILE    = DATA / "v62.0_1240k_public.anno"
+# AADR paths resolved lazily via utils.parsers.resolve_local_aadr() — works
+# for any locally-present version (v62, v66, ...). Placeholders below are
+# overwritten in main() when running in local mode.
+GENO_FILE: Path | None = None
+IND_FILE:  Path | None = None
+SNP_FILE:  Path | None = None
+ANNO_FILE: Path | None = None
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -241,6 +244,13 @@ def main() -> None:
         _tmp_files = [_ind_path, _anno_path, _snp_path]
         geno = R2GenoFile.open(r2_client.GENO_KEY)
     else:
+        from utils.parsers import resolve_local_aadr
+        _aadr = resolve_local_aadr(DATA)
+        global GENO_FILE, IND_FILE, SNP_FILE, ANNO_FILE
+        GENO_FILE, IND_FILE, SNP_FILE, ANNO_FILE = (
+            _aadr["geno"], _aadr["ind"], _aadr["snp"], _aadr["anno"]
+        )
+        log.info("Local AADR resolved: %s", GENO_FILE.name)
         _ind_path  = IND_FILE
         _anno_path = ANNO_FILE
         _snp_path  = SNP_FILE

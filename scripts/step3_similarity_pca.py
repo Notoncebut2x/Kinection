@@ -51,7 +51,12 @@ OUTPUT_LABEL = os.environ.get('OUTPUT_LABEL', 'rn')
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-MIN_INDIV_SNPS   = 10_000   # min overlap SNPs to include an individual in population stats
+# Min overlap SNPs to include an individual in the top-matches list / population
+# stats. Raised from 10k to 50k: at 10k, per-individual ASD has so much sampling
+# noise that low-coverage outliers (e.g. 14k-SNP samples) routinely topped the
+# rankings spuriously. 50k matches the threshold used by the synthesis step
+# (step 1.6 MIN_INDIV_SNPS_FOR_MAP) for consistency.
+MIN_INDIV_SNPS   = 50_000
 MIN_PCA_SNPS     = 100_000  # min 1240k SNPs (from .anno) to include individual in PCA
 PCA_N_COMPONENTS = 10
 # Subsample SNPs used for PCA — peak memory is roughly
@@ -71,9 +76,10 @@ OUT1   = ROOT / "output" / f"step1_{OUTPUT_LABEL}"
 OUTPUT = ROOT / "output" / f"step3_{OUTPUT_LABEL}"
 OUTPUT.mkdir(parents=True, exist_ok=True)
 
-GENO_FILE = DATA / "v62.0_1240k_public.geno"
-IND_FILE  = DATA / "v62.0_1240k_public.ind"
-ANNO_FILE = DATA / "v62.0_1240k_public.anno"
+# Local AADR resolved lazily in main() — works for any version (v62, v66, ...).
+GENO_FILE: Path | None = None
+IND_FILE:  Path | None = None
+ANNO_FILE: Path | None = None
 OVERLAP_TSV = OUT1 / "snp_overlap.tsv"
 MODERN_NPY  = OUT1 / f"modern_indv_{OUTPUT_LABEL}_encoded.npy"
 
@@ -561,6 +567,11 @@ def main() -> None:
             _tmp_files.append(_overlap_path)
         geno = R2GenoFile.open(r2_client.GENO_KEY)
     else:
+        from utils.parsers import resolve_local_aadr
+        _aadr = resolve_local_aadr(DATA)
+        global GENO_FILE, IND_FILE, ANNO_FILE
+        GENO_FILE, IND_FILE, ANNO_FILE = _aadr["geno"], _aadr["ind"], _aadr["anno"]
+        log.info("Local AADR resolved: %s", GENO_FILE.name)
         _overlap_path = OVERLAP_TSV
         _ind_path     = IND_FILE
         _anno_path    = ANNO_FILE
