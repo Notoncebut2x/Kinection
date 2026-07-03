@@ -32,7 +32,13 @@ from . import r2_client
 
 log = logging.getLogger(__name__)
 
-GENO_HEADER_SIZE = 64
+# Bytes fetched to parse the header string; the real data offset is the
+# record length, padded to >= 48 bytes (see packed_header_size).
+GENO_HEADER_READ = 64
+
+
+def packed_header_size(bytes_per_record: int) -> int:
+    return max(48, bytes_per_record)
 
 
 @dataclass
@@ -52,11 +58,12 @@ class R2GenoFile:
     n_indiv: int
     n_snps: int
     bytes_per_snp: int
+    header_size: int = 48
 
     @classmethod
     def open(cls, r2_key: str) -> 'R2GenoFile':
-        """Fetch the 64-byte header from R2 and return a configured instance."""
-        header = r2_client.get_object_bytes(r2_key, byte_range=(0, GENO_HEADER_SIZE - 1))
+        """Fetch the header from R2 and return a configured instance."""
+        header = r2_client.get_object_bytes(r2_key, byte_range=(0, GENO_HEADER_READ - 1))
         header_str = header.split(b'\x00')[0].decode('ascii', errors='replace')
         parts = header_str.split()
         if not parts or parts[0] != 'GENO':
@@ -64,12 +71,13 @@ class R2GenoFile:
         n_indiv       = int(parts[1])
         n_snps        = int(parts[2])
         bytes_per_snp = (n_indiv + 3) // 4
+        header_size   = packed_header_size(bytes_per_snp)
         log.info(
-            'R2GenoFile: %d individuals × %d SNPs, %d bytes/SNP  [key=%s]',
-            n_indiv, n_snps, bytes_per_snp, r2_key,
+            'R2GenoFile: %d individuals × %d SNPs, %d bytes/SNP, %d-byte header  [key=%s]',
+            n_indiv, n_snps, bytes_per_snp, header_size, r2_key,
         )
         return cls(r2_key=r2_key, n_indiv=n_indiv, n_snps=n_snps,
-                   bytes_per_snp=bytes_per_snp)
+                   bytes_per_snp=bytes_per_snp, header_size=header_size)
 
     def read_snp_row(self, snp_index: int) -> np.ndarray:
         """Read a single SNP row. Prefer read_chunk() for bulk reads."""
@@ -92,8 +100,8 @@ class R2GenoFile:
         max_idx = int(geno_indices[-1])
         bps     = self.bytes_per_snp
 
-        byte_start = GENO_HEADER_SIZE + min_idx * bps
-        byte_end   = GENO_HEADER_SIZE + (max_idx + 1) * bps - 1
+        byte_start = self.header_size + min_idx * bps
+        byte_end   = self.header_size + (max_idx + 1) * bps - 1
 
         raw = r2_client.get_object_bytes(self.r2_key, byte_range=(byte_start, byte_end))
         buf = np.frombuffer(raw, dtype=np.uint8)
@@ -102,11 +110,12 @@ class R2GenoFile:
         for out_i, g_idx in enumerate(geno_indices):
             row_start = (int(g_idx) - min_idx) * bps
             row_bytes = buf[row_start : row_start + bps]
+            # MSB-first: first individual of each group is in the high bits.
             gt = np.empty(len(row_bytes) * 4, dtype=np.int8)
-            gt[0::4] =  row_bytes        & 0x03
-            gt[1::4] = (row_bytes >> 2)  & 0x03
-            gt[2::4] = (row_bytes >> 4)  & 0x03
-            gt[3::4] = (row_bytes >> 6)  & 0x03
+            gt[0::4] = (row_bytes >> 6)  & 0x03
+            gt[1::4] = (row_bytes >> 4)  & 0x03
+            gt[2::4] = (row_bytes >> 2)  & 0x03
+            gt[3::4] =  row_bytes        & 0x03
             result[out_i] = gt[: self.n_indiv]
 
         return result
