@@ -87,7 +87,7 @@ from utils.log_redact import RedactGenotypesFilter  # noqa: E402
 for _h in logging.getLogger().handlers:
     _h.addFilter(RedactGenotypesFilter())
 from utils.parsers import (
-    parse_ancestry_dna,
+    parse_modern_dna,
     parse_ind_file,
     parse_anno_file,
     GenoFile,
@@ -265,11 +265,14 @@ def main() -> None:
     # ------------------------------------------------------------------
     # 1. Parse modern individual
     # ------------------------------------------------------------------
-    log.info("Parsing modern individual AncestryDNA file...")
-    modern_snps = parse_ancestry_dna(_modern_path)
+    # Format is auto-detected (AncestryDNA vs 23andMe); override with the
+    # MODERN_DNA_FORMAT env var if detection ever guesses wrong.
+    _modern_format = os.environ.get("MODERN_DNA_FORMAT", "auto")
+    log.info("Parsing modern individual DNA file (format=%s)...", _modern_format)
+    modern_snps = parse_modern_dna(_modern_path, fmt=_modern_format)
 
     # Build position lookup: (chrom, position) → SNP
-    # Chromosome labels are normalised by parse_ancestry_dna (24→Y, 26→MT, etc.)
+    # Chromosome labels are normalised by the parser (24→Y, 26→MT, etc.)
     modern_by_pos: dict[tuple[str, int], SNP] = {}
     for snp in modern_snps.values():
         key = (snp.chrom, snp.position)

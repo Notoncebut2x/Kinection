@@ -86,7 +86,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from utils.log_redact import RedactGenotypesFilter  # noqa: E402
 for _h in logging.getLogger().handlers:
     _h.addFilter(RedactGenotypesFilter())
-from utils.parsers import parse_ancestry_dna, parse_anno_file, parse_ind_file, complement, GenoFile
+from utils.parsers import parse_modern_dna, parse_anno_file, parse_ind_file, complement, GenoFile
 if USE_R2:
     from utils import r2_client
     from utils.r2_geno import R2GenoFile
@@ -919,8 +919,9 @@ def main() -> None:
     # ------------------------------------------------------------------
     # 2. Parse modern individual
     # ------------------------------------------------------------------
-    log.info("Parsing Individual 1 AncestryDNA file...")
-    modern_snps = parse_ancestry_dna(_modern_path)
+    _modern_format = os.environ.get("MODERN_DNA_FORMAT", "auto")
+    log.info("Parsing Individual 1 DNA file (format=%s)...", _modern_format)
+    modern_snps = parse_modern_dna(_modern_path, fmt=_modern_format)
 
     # Separate Y and MT SNPs
     y_snps: dict[str, tuple] = {}

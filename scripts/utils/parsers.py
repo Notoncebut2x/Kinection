@@ -36,6 +36,20 @@ ANCESTRY_CHROM_MAP.update({
     "chromosome": None,  # header row artifact — skip
 })
 
+# ---------------------------------------------------------------------------
+# CHROMOSOME MAP: 23andMe letter codes → standard labels
+# 23andMe already uses near-standard labels (1-22, X, Y, MT); "XY" is the
+# pseudo-autosomal region. Anything else is skipped.
+# ---------------------------------------------------------------------------
+TWENTYTHREE_CHROM_MAP = {str(i): str(i) for i in range(1, 23)}
+TWENTYTHREE_CHROM_MAP.update({
+    "X": "X",
+    "Y": "Y",
+    "MT": "MT",
+    "XY": "PAR",         # pseudo-autosomal region
+    "chromosome": None,  # header row artifact — skip
+})
+
 COMPLEMENT = str.maketrans("ACGTacgt", "TGCAtgca")
 
 
@@ -219,9 +233,156 @@ def parse_ancestry_dna(path: Path) -> dict[str, SNP]:
             )
 
     logger.info(
-        "Parsed %d SNPs from %s (skipped %d)", len(snps), path.name, skipped
+        "Parsed %d SNPs from %s (AncestryDNA, skipped %d)",
+        len(snps), path.name, skipped,
     )
     return snps
+
+
+# ---------------------------------------------------------------------------
+# 23andMe parser
+# ---------------------------------------------------------------------------
+
+def parse_23andme(path: Path) -> dict[str, SNP]:
+    """
+    Parse a 23andMe raw export file (v3/v4/v5 chips).
+
+    Format (GRCh37, tab-separated, header lines commented with '#'):
+        rsid    chromosome    position    genotype
+
+    Unlike AncestryDNA (two separate allele columns), 23andMe packs both
+    alleles into a single `genotype` field:
+      - 2 chars for diploid calls (e.g. "AG"),
+      - 1 char for haploid calls (X/Y/MT in males, e.g. "C"),
+      - "--" / "-" for no-calls,
+      - "II"/"DD"/"I"/"D" for indels.
+
+    Returns a dict keyed by rsID → SNP. No-calls, indels, non-ACGT alleles,
+    and unknown chromosome labels are skipped. Output is identical in shape
+    to parse_ancestry_dna, so downstream steps are format-agnostic.
+    """
+    path = Path(path)
+    snps: dict[str, SNP] = {}
+    skipped = 0
+
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            line = line.rstrip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split("\t")
+            if len(parts) < 4:
+                continue
+            rsid, raw_chrom, raw_pos, genotype = (
+                parts[0], parts[1], parts[2], parts[3]
+            )
+            if rsid == "rsid":
+                continue  # header row (if uncommented)
+
+            chrom = TWENTYTHREE_CHROM_MAP.get(raw_chrom)
+            if chrom is None:
+                skipped += 1
+                continue
+
+            genotype = genotype.strip().upper()
+            # No-calls
+            if not genotype or "-" in genotype:
+                skipped += 1
+                continue
+            # Indels — not useful for SNP matching
+            if "I" in genotype or "D" in genotype:
+                skipped += 1
+                continue
+
+            # 1 char = haploid (treat as homozygous); 2 chars = diploid.
+            if len(genotype) == 1:
+                a1 = a2 = genotype
+            elif len(genotype) == 2:
+                a1, a2 = genotype[0], genotype[1]
+            else:
+                skipped += 1
+                continue
+
+            if a1 not in "ACGT" or a2 not in "ACGT":
+                skipped += 1
+                continue
+
+            try:
+                position = int(raw_pos)
+            except ValueError:
+                skipped += 1
+                continue
+
+            snps[rsid] = SNP(
+                rsid=rsid,
+                chrom=chrom,
+                position=position,
+                allele1=a1,
+                allele2=a2,
+            )
+
+    logger.info(
+        "Parsed %d SNPs from %s (23andMe, skipped %d)",
+        len(snps), path.name, skipped,
+    )
+    return snps
+
+
+# ---------------------------------------------------------------------------
+# Format detection + unified entry point
+# ---------------------------------------------------------------------------
+
+def detect_modern_format(path: Path) -> str:
+    """
+    Sniff a raw modern-DNA export and return "23andme" or "ancestrydna".
+
+    Strategy: read the header comments for a vendor signature; if absent,
+    fall back to the column count of the first data row (AncestryDNA has 5
+    columns — two allele columns; 23andMe has 4 — one genotype column).
+    Defaults to "ancestrydna" if nothing is conclusive.
+    """
+    path = Path(path)
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            if line.startswith("#"):
+                low = line.lower()
+                if "23andme" in low:
+                    return "23andme"
+                if "ancestrydna" in low:
+                    return "ancestrydna"
+                continue
+            parts = line.rstrip().split("\t")
+            ncol = len(parts)
+            if ncol >= 5:
+                return "ancestrydna"
+            if ncol == 4:
+                return "23andme"
+            break
+    return "ancestrydna"
+
+
+def parse_modern_dna(path: Path, fmt: str = "auto") -> dict[str, SNP]:
+    """
+    Parse a raw modern-DNA export, dispatching on format.
+
+    fmt: "auto" (detect from the file), "23andme", or "ancestrydna".
+    Returns the common dict[str, SNP] representation used by every
+    downstream pipeline step.
+    """
+    path = Path(path)
+    fmt = (fmt or "auto").strip().lower()
+    if fmt == "auto":
+        fmt = detect_modern_format(path)
+        logger.info("Detected modern DNA format: %s (%s)", fmt, path.name)
+
+    if fmt in ("23andme", "23andme.txt", "23"):
+        return parse_23andme(path)
+    if fmt in ("ancestrydna", "ancestry", "txt"):
+        return parse_ancestry_dna(path)
+    raise ValueError(
+        f"Unknown modern DNA format {fmt!r}. "
+        f"Expected 'auto', '23andme', or 'ancestrydna'."
+    )
 
 
 # ---------------------------------------------------------------------------
