@@ -33,6 +33,13 @@ __pycache__/
 .env.local
 .dev.vars
 
+# Secrets / credential files — never commit
+r2secretKey.rtf
+*secret*
+*Secret*
+*.pem
+*.key
+
 # Wrangler local state
 .wrangler/
 workers/**/.wrangler/
