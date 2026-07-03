@@ -115,6 +115,16 @@ export default {
         return handleCreateJob(env);
       }
 
+      // POST /jobs/:id/upload-complete — browser signals the presigned PUT
+      // finished; flip 'uploading' -> 'queued' so the daemon picks it up.
+      // Public: the job_id UUID is the capability token (see handleUserDelete).
+      const uploadCompleteMatch = pathname.match(
+        /^\/jobs\/([^/]+)\/upload-complete$/
+      );
+      if (request.method === "POST" && uploadCompleteMatch) {
+        return handleUploadComplete(uploadCompleteMatch[1], env);
+      }
+
       // ── Daemon endpoints (require auth) ───────────────────────────────
       if (request.method === "GET" && pathname === "/jobs") {
         return handleListJobs(request, url, env);
@@ -308,6 +318,63 @@ async function handleCreateJob(env: Env): Promise<Response> {
     .run();
 
   return json({ id, status: "queued", created_at: now }, 201);
+}
+
+async function handleUploadComplete(
+  jobId: string,
+  env: Env
+): Promise<Response> {
+  // Confirm the job exists and is still awaiting its upload. Anything other
+  // than 'uploading' is a no-op success (idempotent — safe under retries and
+  // double-clicks; also tolerates the daemon having already advanced it).
+  const job = await env.DB.prepare(
+    "SELECT id, status FROM jobs WHERE id = ?"
+  )
+    .bind(jobId)
+    .first<{ id: string; status: string }>();
+  if (!job) return err("Job not found", 404);
+  if (job.status !== "uploading") {
+    return json({ ok: true, status: job.status, note: "already advanced" });
+  }
+
+  // Defence-in-depth: verify the raw object actually landed in R2 before we
+  // queue the job. A presigned PUT that never completed leaves nothing here,
+  // and we must not hand the daemon a job with no file to read.
+  const upload = await env.DB.prepare(
+    "SELECT r2_key FROM uploads WHERE job_id = ?"
+  )
+    .bind(jobId)
+    .first<{ r2_key: string }>();
+  if (!upload) return err("Upload record not found", 404);
+
+  const head = await env.R2.head(upload.r2_key);
+  if (head === null) {
+    return err("Upload not found in storage — did the PUT complete?", 409);
+  }
+
+  const now = nowSeconds();
+  const result = await env.DB.prepare(
+    `UPDATE jobs SET status = 'queued', updated_at = ?
+     WHERE id = ? AND status = 'uploading'`
+  )
+    .bind(now, jobId)
+    .run();
+  // Lost the race to another writer (e.g. the reaper aborting a stale job).
+  if (result.meta.changes === 0) {
+    const current = await env.DB.prepare("SELECT status FROM jobs WHERE id = ?")
+      .bind(jobId)
+      .first<{ status: string }>();
+    return json({ ok: true, status: current?.status ?? "unknown" });
+  }
+
+  await logAudit(env, "upload_completed", {
+    actor: "user",
+    job_id: jobId,
+    r2_key: upload.r2_key,
+    extra: { size_bytes: head.size },
+  });
+
+  return json({ ok: true, status: "queued" });
 }
 
 async function handleListJobs(
