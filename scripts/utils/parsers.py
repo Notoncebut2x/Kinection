@@ -355,27 +355,37 @@ def parse_anno_file(path: Path) -> dict[str, AnnoRecord]:
 # EIGENSTRAT PACKGENO binary .geno parser
 # ---------------------------------------------------------------------------
 
-GENO_HEADER_SIZE = 64  # bytes — fixed in EIGENSOFT source
+# The header string is short ("GENO n m h h"); this is only how many bytes
+# we read to *parse* it. The real data offset is the record length (see
+# header_size_for below), which EIGENSOFT pads to at least 48 bytes.
+GENO_HEADER_READ = 64
+
+
+def packed_header_size(bytes_per_record: int) -> int:
+    """EIGENSOFT packedancestrymap header occupies one full record, padded to
+    a minimum of 48 bytes: max(48, bytes_per_record). Data rows follow."""
+    return max(48, bytes_per_record)
 
 
 @dataclass
 class GenoFile:
     """
-    Memory-mapped interface to an EIGENSTRAT PACKGENO binary .geno file.
+    Memory-mapped interface to an EIGENSTRAT PACKEDANCESTRYMAP .geno file.
 
-    Format:
-      - 64-byte text header:  "GENO   {n_indiv} {n_snps} {hash1} {hash2}\\0..."
-      - Then n_snps rows, each ceil(n_indiv / 4) bytes
-      - Each byte packs 4 genotypes as 2-bit values (LSB first):
-          0 = homozygous ref (AA)
-          1 = heterozygous (Aa)
-          2 = homozygous alt (aa)
-          3 = missing
+    Format (verified against AADR v62 + v66 and AdmixTools mcio.c):
+      - Header record of max(48, bytes_per_snp) bytes: "GENO {n_indiv}
+        {n_snps} {hash1} {hash2}" padded with NULs.
+      - Then n_snps rows, each ceil(n_indiv / 4) bytes.
+      - Each byte packs 4 genotypes as 2-bit values, MSB-first: the first
+        individual of the group is in bits 6-7, i.e.
+        value = (byte >> (2 * (3 - (i % 4)))) & 3.
+          0 = homozygous ref  1 = het  2 = homozygous alt  3 = missing
     """
     path: Path
     n_indiv: int
     n_snps: int
     bytes_per_snp: int
+    header_size: int = 48
     _mm: mmap.mmap = field(default=None, repr=False)
     _fh: object = field(default=None, repr=False)
 
@@ -383,7 +393,7 @@ class GenoFile:
     def open(cls, path: Path) -> "GenoFile":
         path = Path(path)
         with open(path, "rb") as fh:
-            raw_header = fh.read(GENO_HEADER_SIZE)
+            raw_header = fh.read(GENO_HEADER_READ)
 
         header_str = raw_header.split(b"\x00")[0].decode("ascii", errors="replace")
         parts = header_str.split()
@@ -393,12 +403,14 @@ class GenoFile:
         n_indiv = int(parts[1])
         n_snps = int(parts[2])
         bytes_per_snp = (n_indiv + 3) // 4
+        header_size = packed_header_size(bytes_per_snp)
 
         obj = cls(
             path=path,
             n_indiv=n_indiv,
             n_snps=n_snps,
             bytes_per_snp=bytes_per_snp,
+            header_size=header_size,
         )
 
         # Open memory-mapped file for efficient random access
@@ -406,7 +418,7 @@ class GenoFile:
         obj._fh = fh
         obj._mm = mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ)
 
-        expected_size = GENO_HEADER_SIZE + n_snps * bytes_per_snp
+        expected_size = header_size + n_snps * bytes_per_snp
         actual_size = obj._mm.size()
         if actual_size < expected_size:
             missing = expected_size - actual_size
@@ -443,16 +455,17 @@ class GenoFile:
             0 = hom ref, 1 = het, 2 = hom alt, 3 = missing
         """
         # Cast to int64 before multiply — snp_index * bytes_per_snp can exceed int32 max
-        offset = GENO_HEADER_SIZE + int(snp_index) * self.bytes_per_snp
+        offset = self.header_size + int(snp_index) * self.bytes_per_snp
         raw = self._mm[offset: offset + self.bytes_per_snp]
         raw_np = np.frombuffer(raw, dtype=np.uint8)
 
-        # Unpack 4 genotypes per byte (2 bits each, LSB first)
+        # Unpack 4 genotypes per byte (2 bits each, MSB first: first
+        # individual of the group is in the high bits).
         gt = np.empty(len(raw_np) * 4, dtype=np.int8)
-        gt[0::4] = raw_np & 0x03
-        gt[1::4] = (raw_np >> 2) & 0x03
-        gt[2::4] = (raw_np >> 4) & 0x03
-        gt[3::4] = (raw_np >> 6) & 0x03
+        gt[0::4] = (raw_np >> 6) & 0x03
+        gt[1::4] = (raw_np >> 4) & 0x03
+        gt[2::4] = (raw_np >> 2) & 0x03
+        gt[3::4] = raw_np & 0x03
 
         return gt[: self.n_indiv]
 
@@ -466,12 +479,12 @@ class GenoFile:
         Output: int8 array of length n_snps
         """
         byte_col = indiv_index // 4
-        bit_shift = (indiv_index % 4) * 2
+        bit_shift = (3 - (indiv_index % 4)) * 2   # MSB-first
         mask = 0x03
 
         genotypes = np.empty(self.n_snps, dtype=np.int8)
         for snp_i in range(self.n_snps):
-            offset = GENO_HEADER_SIZE + int(snp_i) * self.bytes_per_snp + byte_col
+            offset = self.header_size + int(snp_i) * self.bytes_per_snp + byte_col
             if offset >= self._mm.size():
                 genotypes[snp_i] = 3  # missing — truncated file
                 continue
