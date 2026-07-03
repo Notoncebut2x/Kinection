@@ -242,13 +242,13 @@ A web application where users upload their raw AncestryDNA, 23andMe, or similar 
 ### Step 3.1 — Input Format Support
 
 Extend the parser from Step 1.1 to handle all common consumer DNA formats:
-- AncestryDNA (V1.0, V2.0 arrays) — already have examples
-- 23andMe (v3, v4, v5 chips)
-- FamilyTreeDNA (Family Finder)
-- MyHeritage
-- Living DNA
+- AncestryDNA (V1.0, V2.0 arrays) — ✅ `parse_ancestry_dna`
+- 23andMe (v3, v4, v5 chips) — ✅ `parse_23andme` (single genotype column; letter chroms; auto-detected)
+- FamilyTreeDNA (Family Finder) — pending
+- MyHeritage — pending
+- Living DNA — pending
 
-All formats use rsID-based SNP identification; strand-alignment and overlap logic is the same.
+Format is auto-detected by `parse_modern_dna(path, fmt="auto")` (vendor header signature, else 4-vs-5 column count); override via the `MODERN_DNA_FORMAT` env var. All formats collapse to the shared `dict[str, SNP]` representation, so strand-alignment and overlap logic downstream is identical. Covered by `tests/test_parsers_23andme.py`.
 
 ### Step 3.2 — Pipeline Optimisation
 
