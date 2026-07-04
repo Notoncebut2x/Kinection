@@ -143,21 +143,25 @@ loop {
 
 The daemon is the *only* component with access to the user's DNA file.
 
-### 2.5 Analysis pipeline — Python (`scripts/step{1,2,3}_*.py`)
+### 2.5 Analysis pipeline — Python (`scripts/step*.py`)
 
-Three sequential steps. Each reads from local disk (modern DNA) and R2 (AADR reference), and writes outputs to R2 under `outputs/<JOB_ID>/`.
+Six sequential steps. Each reads the modern DNA file (via `MODERN_DNA`, set by the daemon to the downloaded upload) and the AADR reference from R2, and writes outputs to R2 under `outputs/<JOB_ID>/`.
 
 | Step | Script | Inputs | Outputs |
 |---|---|---|---|
-| 1 | `step1_parse_harmonise.py` | AncestryDNA + AADR refs | SNP overlap, encoded modern genotypes |
-| 2 | `step2_haplogroup.py` | step 1 outputs + Y/mtDNA marker DBs | Y-DNA + mtDNA haplogroup, haplogroup matches |
-| 3 | `step3_similarity_pca.py` | step 1 outputs + AADR GENO | Pairwise ASD, population ranking, PCA |
-| 1.5 | `step1_5_admixture.py` | step 1 outputs + AADR GENO | Admixture proportions (WHG/EHG/EEF/Steppe/Levant_N/Iran_N) with 95% CIs |
+| 1.1 | `step1_parse_harmonise.py` | modern DNA (AncestryDNA/23andMe, auto-detected) + AADR refs | SNP overlap, encoded modern genotypes |
+| 1.2 | `step2_haplogroup.py` | step 1 outputs + Y/mtDNA marker DBs | Y-DNA + mtDNA haplogroup, haplogroup matches |
+| 1.3 | `step3_similarity_pca.py` | step 1 outputs + AADR GENO | Pairwise ASD, population ranking, PCA |
+| 1.4 | `step1_4_tmrca.py` | haplogroup matches + AADR GENO | Y + mtDNA TMRCA estimates |
+| 1.5 | `step1_5_admixture.py` | step 1 outputs + AADR GENO | Admixture proportions (WHG/EHG/EEF/Steppe/Levant_N/Iran_N) + 95% CIs |
+| 1.6 | `step1_6_synthesis.py` | all prior outputs | `report.json` + `map_data.geojson` (→ R2, served to the frontend) |
 
-All three steps share `scripts/utils/`:
-- `parsers.py` — AncestryDNA, EIGENSTRAT `.ind`, AADR `.anno`, palindromic SNP filter
+Shared `scripts/utils/`:
+- `parsers.py` — modern DNA (AncestryDNA + 23andMe, `parse_modern_dna` auto-detect), EIGENSTRAT `.ind`, AADR `.anno` (substring-matched, robust to header drift), palindromic SNP filter
 - `r2_client.py` — boto3-wrapped R2 access; defines the `dataset/v<N>/...` key paths
-- `r2_geno.py` — `R2GenoFile` class: reads EIGENSTRAT PACKGENO rows via HTTP range requests, no full download
+- `r2_geno.py` — `R2GenoFile`: reads EIGENSTRAT PACKGENO SNP rows via HTTP range requests, no full download
+
+> **Geno format note (ADR 0017):** AADR v66 ships the geno in the transposed `tgeno` layout, which is converted once to standard SNP-major PACKEDANCESTRYMAP for R2 (`convert_tgeno_to_packed.py`). The readers decode it MSB-first with a `max(48, ⌈n_indiv/4⌉)`-byte header — corrected from an earlier wrong assumption that silently misread autosomal data.
 
 ### 2.6 AADR updater — Python (`scripts/update_aadr.py`)
 
@@ -169,6 +173,10 @@ python scripts/update_aadr.py           # upload if newer
 python scripts/update_aadr.py --force   # re-upload regardless
 ```
 
+### 2.7 Frontend — React + TypeScript SPA (`frontend/`, Cloudflare Pages)
+
+Vite + React + TS single-page app (Tailwind + shadcn-style components), deployed to Cloudflare Pages at **kinection.pages.dev**. Three routes: upload (mints presigned URL → PUTs to R2 → `upload-complete`), status (polls `GET /jobs/:id`), and report (fetches `report.json` + `map_data.geojson`, renders haplogroup badges, admixture chart, TMRCA/match tables). `VITE_API_BASE_URL` is baked in at build time. The map and PCA are placeholders pending the `report.json` PCA wiring.
+
 ---
 
 ## 3. Data Flow — End-to-End
@@ -176,44 +184,45 @@ python scripts/update_aadr.py --force   # re-upload regardless
 ### 3.1 The happy path (one analysis run)
 
 ```
-1. Web client → POST /jobs
-   Worker → INSERT INTO jobs (id=uuid, status='queued')
-   Worker → 201 {id, status: 'queued', created_at}
+1. Frontend (kinection.pages.dev) → POST /uploads/url {label, format, sha256, size}
+   Worker → INSERT jobs (status='uploading') + uploads row; mints a short-lived
+            presigned R2 PUT URL for uploads/<id>/raw.txt
+   Worker → 201 {job_id, upload_url, ...}
 
-2. Web client polls GET /jobs/{id} every few seconds
+2. Browser PUTs the raw file DIRECTLY to R2 via the presigned URL
+   (never traverses the Worker), then POST /jobs/{id}/upload-complete
+   Worker → verifies the object exists, flips status 'uploading' → 'queued'
 
-3. Daemon (local) polls GET /jobs?status=queued (with Bearer auth)
-   Worker → SELECT * FROM jobs WHERE status='queued' LIMIT 10
-   Daemon receives [{id, status, ...}]
+3. Frontend polls GET /jobs/{id} every 3s
 
-4. Daemon → PATCH /jobs/{id}/status {status: 'processing'}
-   Worker → UPDATE jobs SET status='processing'
+4. Daemon (local) polls GET /jobs?status=queued (Bearer auth)
+   → PATCH /jobs/{id}/status {status: 'processing'}
 
-5. Daemon runs:
-   - step1 reads local AncestryDNA file
-   - step1 reads AADR .ind/.snp/.anno from R2 (small)
-   - step1 streams AADR .geno from R2 via HTTP range requests
-   - step1 writes outputs/<id>/snp_overlap.tsv etc. → R2
-   - step2 reads step1 outputs from R2, writes step2 outputs → R2
-   - step3 reads step1 outputs + AADR .geno (range reads) → writes step3 outputs → R2
+5. Daemon downloads uploads/<id>/raw.txt from R2 → sets MODERN_DNA, then runs
+   steps 1.1 → 1.2 → 1.3 → 1.4 → 1.5 → 1.6:
+   - reads the modern file (auto-detects AncestryDNA vs 23andMe)
+   - reads AADR .ind/.snp/.anno from R2 (small) + streams .geno via range reads
+   - each step writes outputs/<id>/… → R2; step 1.6 writes report.json + map_data.geojson
 
-6. Daemon → PATCH /jobs/{id}/status {status: 'complete'}
-   Worker → UPDATE jobs SET status='complete'
+6. Daemon → deletes uploads/<id>/raw.txt from R2, verifies HeadObject 404,
+   POSTs a deletion receipt (persisted to D1)
+   → PATCH /jobs/{id}/status {status: 'complete'}
 
-7. Web client GET /jobs/{id} → sees status='complete'
-   Web client GET /jobs/{id}/results/haplogroup_report.md
-   Worker reads R2 outputs/<id>/haplogroup_report.md → streams to client
+7. Frontend GET /jobs/{id} → 'complete'
+   → GET /jobs/{id}/results/report.json  (Worker streams from R2 outputs/<id>/)
+   → renders the report
 ```
 
-### 3.2 What never crosses the cloud boundary
+### 3.2 The raw-DNA boundary
 
-| Asset | Location | Notes |
+There are two entry paths with different raw-file handling:
+
+| Path | Raw file location | Notes |
 |---|---|---|
-| User's AncestryDNA file | Local disk only | Read by step1, never uploaded |
-| Raw genotype dosage array | Local memory during step1 | Encoded version written *only* to R2 under opaque job ID |
-| Worker → daemon callback | None | Daemon polls. Worker never reaches out. |
+| **Local run** (`run_local.py`) | Local disk only | Never uploaded anywhere. |
+| **Web upload** | R2 `uploads/<id>/raw.txt`, **transient** | Uploaded browser→R2 via presigned PUT (never traverses the Worker); deleted after analysis with a verified receipt (Step 5.1.1). |
 
-This is enforced in code (`r2_client.py` has no `upload_key()` helper for raw DNA), in the Worker (no upload route exists), and in `.gitignore` (`data/input_data/` and `output/` are never tracked).
+In **neither** path does the raw file traverse or persist on the Worker/edge: the Worker has no route that receives file bytes (only mints a presigned URL), logs are genotype-redacted, and `.gitignore` excludes `data/input_data/` and `output/`. In the web path the only persisted genetic data are the *derived* outputs under an opaque job UUID; the raw upload is deleted and receipted. See [`SECURITY.md`](SECURITY.md) Step 5.1.1 for the full modern-DNA lifecycle.
 
 ---
 

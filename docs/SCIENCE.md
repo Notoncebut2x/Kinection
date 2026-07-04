@@ -283,14 +283,36 @@ For someone of purely Northern European ancestry, expect Steppe + WHG + EEF to d
 
 ---
 
+## Reading your report
+
+The pipeline emits a single `report.json` (schema_version 1.0) that the web app renders. Here is what each section means, with a worked example from a real 23andMe upload.
+
+**Header — who you are, genetically.**
+- **SNPs called** — how many usable genotypes were in your file (e.g. 628,854 for a 23andMe v5 array; ~660k for AncestryDNA).
+- **SNP overlap** — how many of those fall on the AADR 1240K panel and survive strand-alignment (e.g. 144,613). This is the working set for every autosomal comparison; a 23andMe array overlaps the 1240K panel less than AncestryDNA, so this number is lower.
+- **Y-haplogroup / mt-haplogroup** — your paternal and maternal deep lineages, with a confidence flag. Resolution depends on how many Y/mt markers your chip carried; a consumer array often resolves to a broad level (e.g. `R`, `X`) rather than a deep sub-branch.
+
+**Admixture** — your autosomal ancestry decomposed into six ancient sources (WHG, EHG, EEF, Steppe, Levant_N, Iran_N) via constrained NNLS (ADR 0013), with 95% bootstrap intervals. A typical Northern/Western European looks Steppe + EEF heavy with a WHG minority. **Read the residual**: it's the fraction of your ancestry the six sources *cannot* explain (~0.29 is normal); the higher it is, the more your ancestry sits outside this six-source model, so interpret the proportions loosely.
+
+**Y-DNA / mtDNA TMRCA** — for your closest ancient haplogroup matches, an estimate of how long ago you shared a common paternal/maternal ancestor, from counting branch-defining differences. These are **order-of-magnitude** estimates (see ADR 0014): the raw difference count is the reliable signal; the year figure has wide CIs and is a rough guide, not a date.
+
+**Haplogroup matches** — ancient individuals who share your Y and/or mt haplogroup, with a PASS/QUESTIONABLE/CRITICAL data-quality flag from the AADR annotation.
+
+**Top population / individual matches** — the ancient populations and individuals closest to you by **allele-sharing distance (ASD)** — the fraction of overlapping SNPs where your genotype differs from theirs, corrected for pseudo-haploidy. Lower is closer. For a European, expect ASD in the ~0.30–0.34 range; the *ranking* is what matters, not the absolute value. Each match carries date, locality, and coordinates (used for the map).
+
+**PCA** — where you fall relative to ancient population clusters. *(Computed in step 3, but not yet wired into `report.json`; the frontend shows a placeholder — a known gap.)*
+
+**Anomalies** — automatic flags for things worth caution (very low overlap with a top match, conflicting haplogroup vs. autosomal signals, etc.).
+
+> One thing to internalise: the closest ancient *individuals* are often not from where your recent ancestors lived. ASD measures overall genetic similarity, and many ancient samples are low-coverage or from admixed periods, so a Northern European can match a Sarmatian or a Viking-era individual simply because those genomes sit near the middle of the relevant genetic cloud. Populations and admixture are the more robust read of "where you come from"; individual matches are more of a curiosity.
+
 ## What's coming
 
-Currently steps 1.1, 1.2, 1.3, and 1.5 are implemented. Planned next:
+All six analysis steps (1.1–1.6) and the web frontend are implemented. Planned next:
 
-- **Step 1.4 — TMRCA estimation** — How long ago did you and a given ancient individual last share a common ancestor? This adds a *time* dimension to the matches.
-- **Step 1.6 — Synthesis report** — A single human-readable PDF combining all steps with maps and a timeline.
-
-Then Phase 2 (web frontend) — a browser-based way for users to upload, kick off, watch, and read their report.
+- **Wire PCA into the report** — step 3 computes it; `report.json` and the frontend scatter plot need hooking up.
+- **More input formats** — FamilyTreeDNA, MyHeritage, Living DNA (AncestryDNA + 23andMe are done).
+- **Move compute off the local daemon** — containerise and run on Cloudflare Containers or a scale-to-zero runner, so no local machine is required.
 
 ---
 
