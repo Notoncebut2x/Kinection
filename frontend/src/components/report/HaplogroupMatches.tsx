@@ -23,11 +23,29 @@ function assessmentVariant(
   }
 }
 
+// The AADR's own data-quality verdict for the ANCIENT sample (contamination,
+// coverage, damage, duplicate/relatedness checks) — not a rating of you or
+// the match. Shown as a hover tooltip on each badge.
+const ASSESSMENT_HELP: Record<Assessment, string> = {
+  PASS: 'AADR data quality: PASS — the ancient sample cleared quality checks.',
+  QUESTIONABLE:
+    'AADR data quality: QUESTIONABLE — borderline (e.g. contamination or low coverage); weigh this match less.',
+  CRITICAL:
+    'AADR data quality: CRITICAL — a serious quality problem (e.g. contamination); the shared haplogroup may be an artifact.',
+}
+
 export function HaplogroupMatches({ matches }: { matches: HaplogroupMatch[] }) {
   return (
     <Card>
       <CardHeader>
         <CardTitle>Haplogroup Matches</CardTitle>
+        <p className="text-sm text-muted-foreground">
+          Ancient individuals who share your Y-DNA and/or mtDNA lineage. The{' '}
+          <span className="font-medium">Assessment</span> badge is the AADR's
+          data-quality verdict for that ancient sample (hover for details) — it
+          reflects how much to trust the sample's data, not the strength of the
+          match.
+        </p>
       </CardHeader>
       <CardContent>
         {matches.length === 0 ? (
@@ -61,7 +79,10 @@ export function HaplogroupMatches({ matches }: { matches: HaplogroupMatch[] }) {
                     {m.combined_score.toFixed(2)}
                   </TableCell>
                   <TableCell>
-                    <Badge variant={assessmentVariant(m.assessment)}>
+                    <Badge
+                      variant={assessmentVariant(m.assessment)}
+                      title={ASSESSMENT_HELP[m.assessment]}
+                    >
                       {m.assessment}
                     </Badge>
                   </TableCell>
@@ -70,6 +91,14 @@ export function HaplogroupMatches({ matches }: { matches: HaplogroupMatch[] }) {
             </TableBody>
           </Table>
         )}
+        {matches.length > 0 ? (
+          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+            <span>Assessment (AADR sample quality):</span>
+            <span><span className="font-medium text-foreground">PASS</span> — cleared QC</span>
+            <span><span className="font-medium text-foreground">QUESTIONABLE</span> — borderline</span>
+            <span><span className="font-medium text-foreground">CRITICAL</span> — serious quality issue</span>
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   )
