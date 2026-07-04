@@ -85,6 +85,10 @@ SOURCES = {
     "EHG": {
         "description": "Eastern European Hunter-Gatherer",
         "patterns": [
+            # v66 group_ids
+            "Russia_Karelia_Mesolithic",
+            "Russia_Sidelkino",
+            # v62 group_ids (kept for local v62 runs)
             "Russia_YuzhniyOleniyOstrov_Mesolithic",
             "Russia_Minino_Mesolithic",
             "Russia_Mesolithic_Veretye",
@@ -94,6 +98,11 @@ SOURCES = {
     "EEF": {
         "description": "Anatolian / Early European Farmer",
         "patterns": [
+            # v66 group_ids (Anatolian Neolithic)
+            "Turkey_N",
+            "Turkey_PPN",
+            "Turkey_Catalhoyuk",
+            # v62 group_ids (kept for local v62 runs)
             "Turkey_Marmara_Barcin_N",
             "Turkey_Central_Catalhoyuk_N_lc",
             "Turkey_Marmara_Mentese_N",

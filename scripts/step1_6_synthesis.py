@@ -46,6 +46,9 @@ from typing import Any
 # Config
 # ---------------------------------------------------------------------------
 OUTPUT_LABEL = os.environ.get("OUTPUT_LABEL", "rn")
+JOB_ID        = os.environ.get("JOB_ID", "")
+USE_R2        = os.environ.get("USE_R2", "").lower() in ("1", "true", "yes")
+LOCAL_OUTPUTS = os.environ.get("LOCAL_OUTPUTS", "").lower() in ("1", "true", "yes")
 N_TOP_INDIVIDUAL_MATCHES = 30
 N_TOP_POPULATION_MATCHES = 20
 N_TOP_HAPLOGROUP_MATCHES = 20
@@ -82,6 +85,9 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from utils.log_redact import RedactGenotypesFilter  # noqa: E402
 for _h in logging.getLogger().handlers:
     _h.addFilter(RedactGenotypesFilter())
+
+if USE_R2:
+    from utils import r2_client  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -404,6 +410,15 @@ def main() -> None:
              len(report["top_population_matches"]),
              len(report["haplogroup_matches"]))
     log.info("Wrote %s  (%d features)", geojson_path, len(geojson["features"]))
+
+    # Upload the canonical report artefacts to R2 (outputs/<job_id>/…) so the
+    # Worker/frontend can serve them. Only in daemon/R2 mode.
+    if USE_R2 and not LOCAL_OUTPUTS:
+        for local_file in (report_path, geojson_path):
+            key = r2_client.output_key(JOB_ID, local_file.name)
+            r2_client.upload_file(local_file, key)
+            log.info("Uploaded %s → R2:%s", local_file.name, key)
+
     if report["anomalies"]:
         log.warning("Anomalies flagged:")
         for a in report["anomalies"]:

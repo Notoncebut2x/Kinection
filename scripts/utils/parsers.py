@@ -423,25 +423,57 @@ def parse_ind_file(path: Path) -> list[Individual]:
 # Allen aDNA Resource .anno parser
 # ---------------------------------------------------------------------------
 
-# Column names are very long — map to short keys
-_ANNO_COLUMN_MAP = {
-    "Genetic ID (suffixes: \".DG\" is a high coverage shotgun genome with diploid genotype calls, \".AG\" is shotgun data with each position in the genome represented by a randomly chosen sequence, \".HO\" is Affymetrix Human Origins genotype data)": "genetic_id",
-    "Group ID": "group_id",
-    "Locality": "locality",
-    "Political Entity": "political_entity",
-    "Lat.": "lat",
-    "Long.": "lon",
-    "Date mean in BP in years before 1950 CE [OxCal mu for a direct radiocarbon date, and average of range for a contextual date]": "date_bp",
-    "Date standard deviation in BP [OxCal sigma for a direct radiocarbon date, and standard deviation of the uniform distribution between the two bounds for a contextual date]": "date_std",
-    "Full Date One of two formats. (Format 1) 95.4% CI calibrated radiocarbon age (Conventional Radiocarbon Age BP, Lab number) e.g. 2624-2350 calBCE (3990±40 BP, Ua-35016). (Format 2) Archaeological context range, e.g. 2500-1700 BCE": "date_range",
-    "Molecular Sex": "molecular_sex",
-    "Y haplogroup in terminal mutation notation automatically called based on Yfull with the software described in Lazaridis et al. Science 2022": "ydna_terminal",
-    "Y haplogroup  in ISOGG v15.73 notation automatically called based on Yfull with the software described in Lazaridis et al. Science 2022": "ydna_isogg",
-    "Y haplogroup manually called if different from automatic": "ydna_manual",
-    "mtDNA haplogroup if >2x or published": "mtdna_haplogroup",
-    "SNPs hit on autosomal targets (Computed using easystats on 1240k snpset)": "snps_1240k",
-    "ASSESSMENT": "assessment",
-}
+# AADR .anno headers are long AND drift between releases (v62 "Lat." became
+# v66 "Latitude"; the genetic-ID header text changed; Y-haplogroup columns
+# gained version numbers; etc.). So instead of exact matching we identify each
+# column by DISTINCTIVE substrings of the (whitespace-normalised, lowercased)
+# header. Ordered; first unassigned key whose substrings all appear wins.
+_ANNO_COLUMN_PATTERNS: list[tuple[str, tuple[str, ...]]] = [
+    ("genetic_id",       ("genetic id (",)),          # not "Persistent Genetic ID"/"Individual ID"
+    ("group_id",         ("group id",)),
+    ("locality",         ("locality",)),
+    ("political_entity", ("political entity",)),
+    ("date_bp",          ("date mean in bp",)),
+    ("date_std",         ("date standard deviation",)),
+    ("date_range",       ("full date",)),
+    ("molecular_sex",    ("molecular sex",)),
+    ("ydna_terminal",    ("y haplogroup", "terminal mutation")),
+    ("ydna_isogg",       ("y haplogroup", "isogg")),
+    ("ydna_manual",      ("y haplogroup", "manually called")),
+    ("mtdna_haplogroup", ("mtdna haplogroup",)),      # not "mtDNA coverage"/"mtDNA match"
+    ("snps_1240k",       ("snps hit on autosomal targets", "1240k")),  # the 1240k panel, not 2M/HO
+    ("assessment",       ("assessment",)),            # "ASSESSMENT" wins over "ASSESSMENT WARNINGS" (earlier col)
+]
+
+
+def _match_anno_column(norm: str, assigned: set[str]) -> str | None:
+    """Return the short-key for a normalised header, or None. lat/lon are
+    handled by prefix to accept both 'Lat.'/'Long.' (v62) and
+    'Latitude'/'Longitude' (v66)."""
+    if "lat" not in assigned and norm.startswith("lat"):
+        return "lat"
+    if "lon" not in assigned and norm.startswith("lon"):
+        return "lon"
+    for short_key, subs in _ANNO_COLUMN_PATTERNS:
+        if short_key in assigned:
+            continue
+        if all(s in norm for s in subs):
+            return short_key
+    return None
+
+
+def _normalize_assessment(val: str) -> str:
+    """Collapse AADR assessment values to canonical PASS/QUESTIONABLE/CRITICAL.
+    v62 used 'PASS'; v66 uses 'Pass', 'PROVISIONAL_PASS', 'MERGE_PASS',
+    'Questionable', 'PROVISIONAL_CRITICAL', etc."""
+    u = (val or "").upper()
+    if "CRITICAL" in u:
+        return "CRITICAL"
+    if "QUESTIONABLE" in u:
+        return "QUESTIONABLE"
+    if "PASS" in u:
+        return "PASS"
+    return u
 
 
 def _safe_float(val: str) -> float | None:
@@ -470,12 +502,16 @@ def parse_anno_file(path: Path) -> dict[str, AnnoRecord]:
     with open(path, encoding="utf-8", errors="replace") as fh:
         reader = csv.DictReader(fh, delimiter="\t")
 
-        # Build a column → short-key mapping for whatever columns exist
+        # Build a column → short-key mapping for whatever columns exist,
+        # matching by distinctive substrings (robust to header drift).
         col_map: dict[str, str] = {}
+        assigned: set[str] = set()
         for full_name in (reader.fieldnames or []):
-            stripped = full_name.strip()
-            if stripped in _ANNO_COLUMN_MAP:
-                col_map[full_name] = _ANNO_COLUMN_MAP[stripped]
+            norm = " ".join(full_name.split()).lower()
+            short_key = _match_anno_column(norm, assigned)
+            if short_key:
+                col_map[full_name] = short_key
+                assigned.add(short_key)
 
         for row in reader:
             def get(key: str, default: str = "") -> str:
@@ -504,7 +540,7 @@ def parse_anno_file(path: Path) -> dict[str, AnnoRecord]:
                 ydna_manual=get("ydna_manual"),
                 mtdna_haplogroup=get("mtdna_haplogroup"),
                 snps_1240k=_safe_int(get("snps_1240k")),
-                assessment=get("assessment"),
+                assessment=_normalize_assessment(get("assessment")),
             )
             records[genetic_id] = rec
 
