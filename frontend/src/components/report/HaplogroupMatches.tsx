@@ -49,7 +49,20 @@ export function HaplogroupMatches({ matches }: { matches: HaplogroupMatch[] }) {
       </CardHeader>
       <CardContent>
         {matches.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No matches.</p>
+          <div className="space-y-2 text-sm text-muted-foreground">
+            <p>No reliable haplogroup matches.</p>
+            <p>
+              This usually means your Y-DNA and/or mtDNA haplogroup couldn't be
+              confidently resolved from this file — consumer arrays (AncestryDNA,
+              23andMe) cover only a small fraction of the markers that define the
+              Y and mtDNA trees. Rather than list matches to a deep
+              macro-haplogroup (which would be misleading), they're omitted here.
+              Your <span className="font-medium">admixture</span> and{' '}
+              <span className="font-medium">population matches</span> are the more
+              reliable read of your ancestry from array data; for precise
+              haplogroups, a dedicated Y or full-mtDNA test is needed.
+            </p>
+          </div>
         ) : (
           <Table>
             <TableHeader>
