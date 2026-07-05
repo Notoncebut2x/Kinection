@@ -374,15 +374,16 @@ Treat the raw modern-individual file as the most sensitive object in the system.
 
 ## Immediate Next Action
 
-**Phase 1 is complete; Phase 2.3 (D1 schema) and most of Step 5.1.1 backend are shipped.**
+**Shipped:** full pipeline (steps 1.1–1.6), Cloudflare backend (Worker + R2 + D1 + KV), presigned-PUT upload + verified deletion, React frontend on Pages, AADR **v66** (tgeno→packed + geno reader fix, ADR 0017), AncestryDNA + 23andMe input, and validated end-to-end (a real upload → correct person-specific report).
 
-What's left for an MVP:
+What's left, in priority order:
 
-1. **Apply the new D1 schema in production.** `workers/api/src/schema.sql` is ready (ADR 0015). Run `wrangler d1 execute kinection --remote --file=src/schema.sql`. One-shot operation.
-2. **Configure the new Worker secrets.** `wrangler secret put R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`. These power the presigned-PUT upload flow.
-3. **Frontend (Phase 4).** A small React + TypeScript + Tailwind app that calls `POST /uploads/url`, PUTs the file to R2, polls `GET /jobs/:id` for status, then renders `report.json` + `map_data.geojson`. This is the biggest remaining chunk of work.
-4. **Step 3.1 — Input format support.** Currently only AncestryDNA; extend the parser to 23andMe, FTDNA, MyHeritage. Strand-alignment logic already works for any rsID-based format.
-5. **Cron Trigger for the reaper.** `scripts/reaper.py` exists; needs a Cloudflare Cron Trigger (or a cron job on the daemon host) wired up so it runs daily.
+1. **Y-DNA SNP→tree resolution (ISOGG map).** Ancient Y recorded in SNP notation (`R-M269`) is crudely stripped to `R`, so those individuals are *missed* by the haplogroup matcher (it only reads branch notation like `R1b1a1b`). Load an ISOGG SNP→haplogroup map so `M269 → R1b1a1b`, giving richer/correct paternal matches — and improving the modern Y caller's resolution too. (Larger task: thousands of SNPs.)
+2. **Wire PCA into the report.** Step 3 computes PCA, but `report.json` (`pca` field) and the frontend scatter plot aren't hooked up — currently a placeholder.
+3. **Auto-convert AADR `tgeno` on ingest.** Teach `update_aadr.py` to run `convert_tgeno_to_packed.py` so future AADR releases don't reintroduce the transposed-format problem (ADR 0017).
+4. **Reaper Cron Trigger.** `scripts/reaper.py` exists; wire a Cloudflare Cron Trigger (or a cron on the daemon host) to sweep orphaned uploads daily.
+5. **More input formats.** Extend the parser to FamilyTreeDNA, MyHeritage, Living DNA (AncestryDNA + 23andMe done).
+6. **Move compute off the local daemon.** Containerise and run on Cloudflare Containers or a scale-to-zero runner (Fly Machines / Cloud Run) so no local machine is required.
 
 **Working files:**
 - Modern: `data/input_data/AncestryDNA_{rn,jn}.txt` (gitignored)

@@ -35,6 +35,7 @@ For the security posture, see [`../SECURITY.md`](../SECURITY.md).
 | [0011](0011-cloudflare-r2-geno-storage.md) | Store AADR GENO file in Cloudflare R2, access via range requests | Accepted | Phase 2 |
 | [0012](0012-cloudflare-workers-api.md) | Use Cloudflare Workers as the web API layer | Accepted | Phase 2 |
 | [0013](0013-admixture-nnls.md) | Admixture decomposition via constrained NNLS | Accepted | Phase 1 |
-| [0014](0014-encoding-and-tmrca-calibration.md) | AADR PACKGENO encoding convention and Y-DNA TMRCA calibration | Accepted | Phase 1 |
+| [0014](0014-encoding-and-tmrca-calibration.md) | AADR PACKGENO encoding convention and Y-DNA TMRCA calibration | Accepted (byte-level decoding amended by 0017) | Phase 1 |
 | [0015](0015-d1-schema-v1.md) | D1 schema v1 (jobs, uploads, deletion_receipts, results, audit_log, users, auth_identities) | Accepted | Phase 2 |
 | [0016](0016-mtdna-ingest-plan.md) | mtDNA capture-data ingest (AADR mt repo → mt TMRCA in step 1.4) | Accepted | Phase 1 |
+| [0017](0017-aadr-v66-tgeno-and-geno-reader-correction.md) | AADR v66 `tgeno` format + geno reader byte-level correction (MSB packing, header size); `.anno` header-drift robustness | Accepted | Phase 1/2 |

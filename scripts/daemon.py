@@ -46,6 +46,7 @@ SCRIPTS_DIR = Path(__file__).parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 from utils.log_redact import RedactGenotypesFilter  # noqa: E402
 from utils import r2_delete  # noqa: E402
+from utils import r2_client  # noqa: E402
 for h in logging.getLogger().handlers:
     h.addFilter(RedactGenotypesFilter())
 
@@ -82,6 +83,17 @@ def complete_job(job_id: str, error: str | None = None) -> None:
 
 def run_analysis(job_id: str) -> None:
     env = {**os.environ, "JOB_ID": job_id, "USE_R2": "1"}
+
+    # Download THIS job's uploaded raw DNA file from R2 and point the pipeline
+    # at it via MODERN_DNA. Without this the steps fall back to the local
+    # default file, so every job would analyse the same person. Format
+    # (AncestryDNA vs 23andMe) is auto-detected downstream.
+    raw_key = upload_key_for(job_id)
+    raw_local = r2_client.download_to_temp(raw_key, ".txt")
+    env["MODERN_DNA"] = str(raw_local)
+    env["OUTPUT_LABEL"] = job_id[:8]     # per-job output dirs, avoid collisions
+    log.info("[%s] fetched uploaded DNA file from R2 (%s)", job_id, raw_key)
+
     steps = [
         "step1_parse_harmonise.py",
         "step2_haplogroup.py",
@@ -90,18 +102,25 @@ def run_analysis(job_id: str) -> None:
         "step1_5_admixture.py",
         "step1_6_synthesis.py",
     ]
-    for step in steps:
-        log.info("[%s] running %s", job_id, step)
-        result = subprocess.run(
-            [sys.executable, str(SCRIPTS_DIR / step)],
-            env=env,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"{step} exited {result.returncode}:\n{result.stderr[-2000:]}"
+    try:
+        for step in steps:
+            log.info("[%s] running %s", job_id, step)
+            result = subprocess.run(
+                [sys.executable, str(SCRIPTS_DIR / step)],
+                env=env,
+                capture_output=True,
+                text=True,
             )
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"{step} exited {result.returncode}:\n{result.stderr[-2000:]}"
+                )
+    finally:
+        # Never leave the plaintext raw DNA on local disk after the run.
+        try:
+            raw_local.unlink()
+        except Exception:
+            pass
 
 
 def post_deletion_receipt(job_id: str, receipt: r2_delete.DeletionReceipt) -> None:

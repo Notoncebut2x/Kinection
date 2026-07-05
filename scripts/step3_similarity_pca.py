@@ -733,6 +733,7 @@ def main() -> None:
     # 7. PCA
     # ------------------------------------------------------------------
     log.info("Identifying high-coverage individuals for PCA...")
+    pca_path = None            # set below only if PCA actually runs
     pca_mask = np.zeros(n_indiv, dtype=bool)
     for i, ind in enumerate(individuals):
         rec = anno.get(ind.genetic_id)
@@ -841,9 +842,10 @@ def main() -> None:
     # Upload outputs to R2 (R2 mode only, unless LOCAL_OUTPUTS=1)
     # ------------------------------------------------------------------
     if USE_R2 and not LOCAL_OUTPUTS:
-        output_files = [dist_path, pop_path, pca_path,
-                        OUTPUT / "pca_variance_explained.json",
+        output_files = [dist_path, pop_path,
                         OUTPUT / "top_matches_report.md"]
+        if pca_path is not None:
+            output_files += [pca_path, OUTPUT / "pca_variance_explained.json"]
         for local_file in output_files:
             if Path(local_file).exists():
                 key = r2_client.output_key(JOB_ID, Path(local_file).name)
