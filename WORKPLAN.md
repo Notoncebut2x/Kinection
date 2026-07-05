@@ -61,7 +61,7 @@ A web application where users upload their raw AncestryDNA, 23andMe, or similar 
 **Objective:** Convert Individual 1's AncestryDNA file and the EIGENSTRAT ancient dataset into a common representation for comparison.
 
 **Tasks:**
-- Parse `modern_indvidual.txt` (rsID, chromosome, position, allele1, allele2; build GRCh37)
+- Parse `modern_individual.txt` (rsID, chromosome, position, allele1, allele2; build GRCh37)
 - Parse `v62.0_1240k_public.snp` to extract SNP positions (EIGENSTRAT format: SNP ID, chromosome, genetic position, physical position, ref allele, alt allele)
 - Parse `v62.0_1240k_public.ind` to build individual index (ID, sex, population label)
 - Parse `v62.0_1240k_public.geno` (binary: 2 bits per genotype, row = SNP, column = individual) into a usable array or memory-mapped structure

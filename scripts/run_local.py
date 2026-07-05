@@ -245,8 +245,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--dna",
-        help="Path to the AncestryDNA raw file. "
-             "Defaults to data/input_data/AncestryDNA_rn.txt.",
+        required=True,
+        help="Path to your raw DNA file (AncestryDNA or 23andMe; auto-detected). "
+             "Required — there is no default file.",
     )
     parser.add_argument(
         "--label",
@@ -291,11 +292,13 @@ def main() -> None:
         "USE_R2": "0" if have_local_aadr else "1",
         "OUTPUT_LABEL": args.label,
     }
-    if args.dna:
-        env["MODERN_DNA"] = str(Path(args.dna).expanduser().resolve())
+    dna_path = Path(args.dna).expanduser().resolve()
+    if not dna_path.exists():
+        sys.exit(f"DNA file not found: {dna_path}")
+    env["MODERN_DNA"] = str(dna_path)
 
     print(f"Job label   : {job_label}")
-    print(f"DNA file    : {env.get('MODERN_DNA', '(default: data/input_data/AncestryDNA_rn.txt)')}")
+    print(f"DNA file    : {env['MODERN_DNA']}")
     print(f"AADR source : {'local disk (no R2 access)' if have_local_aadr else 'R2 (read-only)'}")
     print(f"Outputs     : local only (no Cloudflare writes)")
 

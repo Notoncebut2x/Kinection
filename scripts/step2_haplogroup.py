@@ -54,7 +54,7 @@ DATA = ROOT / "data" / "input_data"
 OUTPUT = ROOT / "output" / f"step2_{OUTPUT_LABEL}"
 OUTPUT.mkdir(parents=True, exist_ok=True)
 
-MODERN_INDV1  = DATA / "AncestryDNA_rn.txt"
+# No built-in default DNA file — the modern file is supplied via MODERN_DNA.
 YDNA_MARKERS  = ROOT / "scripts" / "data" / "ydna_markers.json"
 MTDNA_MARKERS = ROOT / "scripts" / "data" / "mtdna_markers.json"
 # Local AADR resolved lazily in main() — works for any version (v62, v66, ...).
@@ -922,9 +922,17 @@ def main() -> None:
     # Resolve input paths (download from R2 to temp files if USE_R2)
     # ------------------------------------------------------------------
     _tmp_files: list[Path] = []
-    # Modern individual DNA file always read from local disk — never stored in R2.
-    # MODERN_DNA env var overrides the default path so different individuals can be analysed.
-    _modern_path = Path(os.environ['MODERN_DNA']) if os.environ.get('MODERN_DNA') else MODERN_INDV1
+    # The modern DNA file must be supplied explicitly via MODERN_DNA. No
+    # fallback default — we never silently analyse a bundled/other individual.
+    _modern_env = os.environ.get('MODERN_DNA')
+    if not _modern_env:
+        log.error("No modern DNA file provided. Set the MODERN_DNA env var "
+                  "(e.g. `run_local.py --dna <file>`); there is no default file.")
+        sys.exit(1)
+    _modern_path = Path(_modern_env)
+    if not _modern_path.exists():
+        log.error("Modern DNA file not found: %s", _modern_path)
+        sys.exit(1)
 
     if USE_R2:
         log.info("R2 mode: downloading AADR reference files for job %s", JOB_ID)
