@@ -65,7 +65,7 @@ Step 1.4's primary reported metric is the raw `k/L` Y-SNP difference rate (rate-
 - The encoding convention is documented in one place; future steps can rely on it.
 
 **Negative:**
-- Any previously-saved Step 1.3 outputs (`pairwise_distances.tsv`, `population_distances.tsv`, `top_matches_report.md`, PCA coordinates) are invalid and must be regenerated. The fix invalidates the existing rn and jn step 3 outputs.
+- Any previously-saved Step 1.3 outputs (`pairwise_distances.tsv`, `population_distances.tsv`, `top_matches_report.md`, PCA coordinates) are invalid and must be regenerated. The fix invalidates any existing modern-individual step 3 outputs.
 - The reported TMRCA confidence intervals reflect Poisson sampling noise only, not the ±factor-of-2 rate uncertainty. Quoted absolute ages should be widened accordingly in user-facing reports.
 - The calibrated rate (7 × 10⁻⁶ /panel-SNP/year) is empirical and ties results to a single anchor (R1b ~20 ky). A future iteration could recalibrate against multiple known coalescence dates (R1a, I1, J1 …) to reduce single-anchor bias.
 

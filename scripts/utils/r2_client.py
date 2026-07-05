@@ -122,6 +122,19 @@ def download_to_temp(key: str, suffix: str = '') -> Path:
     return Path(tmp.name)
 
 
+def download_to_named_temp(key: str, filename: str) -> Path:
+    """
+    Download an R2 object into a fresh temp directory under a chosen, generic
+    filename (e.g. 'modern_individual.txt') — so the on-disk working copy is
+    never named after any specific person. Returns the file path; caller should
+    delete the file and its parent directory when done.
+    """
+    d = Path(tempfile.mkdtemp(prefix='kinection_'))
+    dest = d / filename
+    get_r2_client().download_file(R2_BUCKET, key, str(dest))
+    return dest
+
+
 # ---------------------------------------------------------------------------
 # Dynamic dataset version resolution
 # ---------------------------------------------------------------------------

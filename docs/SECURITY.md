@@ -27,8 +27,8 @@ The data being protected is **personal genetic data** — fundamentally non-rota
 **Status:** Enforced in code and config.
 
 - `r2_client.py` exposes no `upload_key()` helper for raw DNA. The only R2 keys defined are dataset paths and per-job *output* paths.
-- The Worker API has no `POST /upload` route — earlier drafts had one and it was removed.
-- The pipeline scripts (`step1`, `step2`) read the modern individual's file from a local path (`MODERN_INDV1`) regardless of `USE_R2`.
+- The Worker API has no route that *receives* raw file bytes. The browser uploads directly to per-job R2 storage via a short-lived presigned PUT URL (minted by `POST /uploads/url`), so the raw file never traverses the Worker; the daemon downloads it, analyses it, and deletes it with a verified receipt.
+- The pipeline scripts read the modern file only from the `MODERN_DNA` path (set by `run_local.py --dna` locally, or by the daemon after downloading the per-job upload to a generic `modern_individual.txt`). There is **no default/bundled DNA file** — the scripts error out if `MODERN_DNA` is unset, so they never silently analyse anyone else's DNA.
 - `.gitignore` covers `data/input_data/` (raw inputs) and `output/` (derived data).
 
 ### 2. Personal genetic data purged from git history

@@ -85,11 +85,12 @@ def run_analysis(job_id: str) -> None:
     env = {**os.environ, "JOB_ID": job_id, "USE_R2": "1"}
 
     # Download THIS job's uploaded raw DNA file from R2 and point the pipeline
-    # at it via MODERN_DNA. Without this the steps fall back to the local
-    # default file, so every job would analyse the same person. Format
-    # (AncestryDNA vs 23andMe) is auto-detected downstream.
+    # at it via MODERN_DNA. The steps have no default file, so this is the only
+    # way they get a modern individual. The on-disk copy is named generically
+    # ('modern_individual.txt'), never after any person. Format (AncestryDNA vs
+    # 23andMe) is auto-detected downstream.
     raw_key = upload_key_for(job_id)
-    raw_local = r2_client.download_to_temp(raw_key, ".txt")
+    raw_local = r2_client.download_to_named_temp(raw_key, "modern_individual.txt")
     env["MODERN_DNA"] = str(raw_local)
     env["OUTPUT_LABEL"] = job_id[:8]     # per-job output dirs, avoid collisions
     log.info("[%s] fetched uploaded DNA file from R2 (%s)", job_id, raw_key)
@@ -119,6 +120,7 @@ def run_analysis(job_id: str) -> None:
         # Never leave the plaintext raw DNA on local disk after the run.
         try:
             raw_local.unlink()
+            raw_local.parent.rmdir()
         except Exception:
             pass
 
