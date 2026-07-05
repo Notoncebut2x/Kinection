@@ -22,7 +22,7 @@ Survey of the AADR v66 release confirms:
 
 Per the AADR paper, the mt repository has held ~4,122 ancient mt genomes since v52.2 (Mallick et al., *Scientific Data* 2024). Format: **FASTA** of consensus sequences aligned to rCRS (revised Cambridge Reference Sequence, 16,569 bp).
 
-The modern AncestryDNA file covers **~195 mt positions** (encoded as chromosome `26` in the AncestryDNA convention). Empirically confirmed for the `rn` test file.
+The modern AncestryDNA file covers **~195 mt positions** (encoded as chromosome `26` in the AncestryDNA convention). Empirically confirmed on a test AncestryDNA file.
 
 ## Decision (Proposed)
 
@@ -59,7 +59,7 @@ Implement mtDNA TMRCA as a follow-on step. Concrete plan in 5 sub-steps:
 ### 5. Tests + report integration
 
 - Unit test for `parse_mt_repo` (synthetic FASTA fixture).
-- Unit test for the modern mt extraction (using a small slice of the rn AncestryDNA file with the rsIDs allow-listed via `# allow-raw-dna`).
+- Unit test for the modern mt extraction (using a small synthetic AncestryDNA slice with the rsIDs allow-listed via `# allow-raw-dna`).
 - Update `run_local.py` to render an mt-TMRCA section in the combined report.
 - Update `scripts/step1_6_synthesis.py` to include mt-TMRCA matches in `report.json` and `map_data.geojson` (with `match_type: "mt_tmrca"`).
 
@@ -92,7 +92,7 @@ Other consumer formats sometimes have denser mt coverage (e.g. FTDNA mt-Full seq
 
 One implementation correction worth noting: the original plan said "no ascertainment correction needed" for mt because we have full ancient mt genomes. That was wrong on the modern side — AncestryDNA's ~190 mt positions ARE ascertained for polymorphism. The implementation uses the full mt-genome length (16,569 bp) as the per-bp formula's denominator, with the assumption that unsampled positions agree between the two samples — a reasonable assumption given mt's high conservation outside the few hundred well-known polymorphic sites. Without this correction, TMRCAs came out ~100× too high (millions of years for k=3 over 170 sampled sites).
 
-Validated on rn: 5 mt-haplogroup matches, TMRCAs in the 5,400-year range with Poisson 95% CIs of 1,100–16,000 — biologically sensible for related R-haplogroup lineages.
+Validated on a test individual: 5 mt-haplogroup matches, TMRCAs in the 5,400-year range with Poisson 95% CIs of 1,100–16,000 — biologically sensible for related R-haplogroup lineages.
 
 ## References
 

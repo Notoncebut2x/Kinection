@@ -24,12 +24,7 @@ A web application where users upload their raw AncestryDNA, 23andMe, or similar 
 
 ## Input Data
 
-**Modern individuals (gitignored, local-only, never uploaded to cloud):**
-
-| File | Description |
-|------|-------------|
-| `data/input_data/AncestryDNA_rn.txt` | Individual "rn" — AncestryDNA raw |
-| `data/input_data/AncestryDNA_jn.txt` | Individual "jn" — AncestryDNA raw |
+**Modern individual:** a consumer raw-DNA file (AncestryDNA or 23andMe, auto-detected). In the local path it stays on disk (gitignored, never uploaded); in the web path it is uploaded to transient per-job R2 storage and deleted after analysis. No specific individuals are referenced here.
 
 **Ancient reference dataset (v62 on disk, v66 in R2):**
 
@@ -386,7 +381,7 @@ What's left, in priority order:
 6. **Move compute off the local daemon.** Containerise and run on Cloudflare Containers or a scale-to-zero runner (Fly Machines / Cloud Run) so no local machine is required.
 
 **Working files:**
-- Modern: `data/input_data/AncestryDNA_{rn,jn}.txt` (gitignored)
+- Modern: your consumer DNA file in `data/input_data/` (gitignored, local-only)
 - Ancient (local): `data/input_data/v62.0_1240k_public.{geno,ind,snp,anno}`
 - Ancient (R2):   `dataset/v66/v66.1240K.aadr.PUB.{geno,ind,snp,anno}`
 - Entry point:    `python scripts/run_local.py --dna <file> --label <name>`
