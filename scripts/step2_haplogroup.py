@@ -67,6 +67,21 @@ OVERLAP_TSV   = ROOT / "output" / f"step1_{OUTPUT_LABEL}" / "snp_overlap.tsv"
 MIN_Y_SNPS  = 10
 MIN_MT_SNPS = 10
 
+# Minimum shared haplogroup-prefix length for an ancient match to count.
+# Filters uninformative macro-haplogroup matches (e.g. sharing only "R" or
+# "L3"), which are noise rather than a shared lineage.
+MIN_MATCH_PREFIX = 2
+
+# Modern assignments we will NOT match on: low-confidence fallbacks and
+# sentinels. Consumer arrays often can't resolve Y/mt from the few defining
+# markers they carry; matching on an unresolved macro-haplogroup (the mt
+# caller's "L3 or pre-L3" fallback, or an "Unknown" Y) produces misleading
+# matches, so we suppress them instead.
+UNRESOLVED_HAPLOGROUPS = {
+    "unknown", "l3 or pre-l3", "", "n/a",
+    "n/a (female)", "n/a (sex unknown)",
+}
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -130,6 +145,18 @@ def strip_haplogroup_prefix(hap: str) -> str:
     if "-" in hap:
         return hap.split("-")[0].strip()
     return hap.strip()
+
+
+def usable_for_matching(haplogroup: str, confidence: str) -> bool:
+    """
+    Whether a modern haplogroup assignment is trustworthy enough to search for
+    ancient matches. A low-confidence or fallback assignment (e.g. the mt
+    caller's 'L3 or pre-L3', or an 'Unknown' Y) is not — matching on it just
+    returns everyone who happens to share a deep macro-haplogroup.
+    """
+    if (haplogroup or "").strip().lower() in UNRESOLVED_HAPLOGROUPS:
+        return False
+    return (confidence or "").lower() in ("high", "medium")
 
 
 # ---------------------------------------------------------------------------
@@ -459,22 +486,42 @@ def match_ancient_haplogroups(
     y_haplogroup: str,
     mt_haplogroup: str,
     anno_records: dict,
+    y_confidence: str = "low",
+    mt_confidence: str = "low",
     top_n: int = 50,
 ) -> list[dict]:
     """
     Search the ancient .anno file for individuals whose Y or mtDNA haplogroup
     matches (prefix) the modern individual's haplogroup assignment.
 
+    Only *resolved, confident* modern haplogroups are matched on (see
+    usable_for_matching): an unresolved/low-confidence assignment is skipped so
+    we don't return everyone sharing a deep macro-haplogroup. A match also
+    requires a shared prefix of at least MIN_MATCH_PREFIX characters.
+
     Returns a list of match dicts sorted by:
       1. Match type (Y+MT > Y-only > MT-only)
       2. Haplogroup proximity score (longer prefix match = closer)
       3. Date (oldest to most recent)
+    Returns [] when neither the Y nor the mt assignment is usable.
     """
     matches = []
 
-    # Normalise query haplogroups — strip notation like 'R-M269' → 'R'
-    y_query_isogg = strip_haplogroup_prefix(y_haplogroup) if y_haplogroup else ""
-    mt_query = mt_haplogroup.strip() if mt_haplogroup else ""
+    # Only match on assignments we actually trust.
+    y_usable  = usable_for_matching(y_haplogroup, y_confidence)
+    mt_usable = usable_for_matching(mt_haplogroup, mt_confidence)
+    y_query_isogg = strip_haplogroup_prefix(y_haplogroup) if y_usable else ""
+    mt_query = mt_haplogroup.strip() if mt_usable else ""
+
+    if not y_query_isogg and not mt_query:
+        log.warning(
+            "No usable modern haplogroup for matching "
+            "(Y=%r/%s, mt=%r/%s) — suppressing haplogroup matches. "
+            "Consumer arrays often can't resolve Y/mt; trust the autosomal "
+            "population and admixture results instead.",
+            y_haplogroup, y_confidence, mt_haplogroup, mt_confidence,
+        )
+        return []
 
     for genetic_id, rec in anno_records.items():
         if rec.assessment == "IGNORE":
@@ -492,12 +539,12 @@ def match_ancient_haplogroups(
 
         if y_query_isogg and ancient_y:
             y_score = haplogroup_prefix_match(y_query_isogg, ancient_y)
-            if y_score >= 1:
+            if y_score >= MIN_MATCH_PREFIX:
                 y_match = True
 
         if mt_query and ancient_mt:
             mt_score = haplogroup_prefix_match(mt_query, ancient_mt)
-            if mt_score >= 1:
+            if mt_score >= MIN_MATCH_PREFIX:
                 mt_match = True
 
         if not y_match and not mt_match:
@@ -986,6 +1033,8 @@ def main() -> None:
     matches = match_ancient_haplogroups(
         y_haplogroup=y_result["haplogroup"],
         mt_haplogroup=mt_result["haplogroup"],
+        y_confidence=y_result.get("confidence", "low"),
+        mt_confidence=mt_result.get("confidence", "low"),
         anno_records=anno,
         top_n=100,
     )
